@@ -1,9 +1,7 @@
 /* The screens.
  *
  * Everything with an address in a comment came out of out/sbp98.c or
- * out/sbp98.asm; everything else is this port's own choice and is called out
- * as such, because the original's drawing for those bits has not been
- * recovered yet.
+ * out/sbp98.asm; anything else is this port's own choice and says so.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,28 +9,66 @@
 
 #include "app.h"
 
-/* WINDOWS.CGM carries the digits: y = 300, nine rows tall, nine pixels apart
- * from x = 0, so digit d starts at (d * 9, 300).  It is a one-plane sheet
- * drawn ink-on-white, so a CLEAR bit is the ink. */
-#define DIGIT_Y 300
-#define DIGIT_W 9
-#define DIGIT_H 9
-
-/* The play screen's ground.  FUN_1edb_109b does setfillstyle(SOLID, 3) and
- * then bar(0, 0, 0x27f, 399) before anything else, so the board sits on
- * colour 3 of the tile palette - a cream, not black. */
+/* FUN_1edb_109b does setfillstyle(SOLID, 3) then bar(0, 0, 0x27f, 399) before
+ * anything else, so the board sits on colour 3 of the tile palette. */
 #define PLAY_GROUND 3
 
-/* The select screen runs on the title palette (FUN_1edb_03c9 calls
- * FUN_2406_000c, which is the DS:0x02a0 table), so the thumbnails have to be
- * drawn in colours that exist there.  The original's thumbnail drawing has
- * not been found yet; these are this port's choice out of that palette:
- * 0x0f white ground, 0x04 dark brown wall, 0x0c red goal, 0x0a yellow box. */
-#define SEL_GROUND 15
-#define SEL_WALL 4
-#define SEL_GOAL 12
-#define SEL_BOX 10
-#define SEL_INK 0
+/* FUN_2329_000d's colours: the panel and an uncleared cell are 0x0f, a cleared
+ * one is 0x0c, and the border round each cell is 0. */
+#define SEL_PANEL 15
+#define SEL_DONE 12
+#define SEL_EDGE 0
+
+/* The loading screen has a palette of its own, four entries of it, straight
+ * out of FUN_1edb_000e:
+ *
+ *     setrgbpalette(0,  15, 15, 15)     the ground: white
+ *     setrgbpalette(9,  15, 15, 15)
+ *     setrgbpalette(13,  0, 11,  0)     the logo: green
+ *     setrgbpalette(4,  15, 15, 15)
+ *
+ * then, once the files check out, it walks i from 0 to 15 doing
+ *
+ *     setrgbpalette(13, i, i / 4 + 12, i)
+ *
+ * which takes 13 from green up to white so the logo dissolves into the
+ * ground, and finishes with setrgbpalette(13, 0, 0, 0) - the logo coming
+ * back in black.  Then the title loads.
+ *
+ * The dwell at each stage is this port's; the original's is however long the
+ * disk takes. */
+#define BOOT_GROUND 0
+#define BOOT_INK 13
+#define BOOT_GREEN_UNTIL 40
+#define BOOT_FADE_STEP 4                 /* ticks per fade step */
+#define BOOT_FADE_UNTIL (BOOT_GREEN_UNTIL + 16 * BOOT_FADE_STEP)
+#define BOOT_HOLD (BOOT_FADE_UNTIL + 70)
+
+static void boot_palette(App *a, int r, int g, int b)
+{
+    int i, j;
+    for (i = 0; i < 16; i++)
+        for (j = 0; j < 3; j++) a->bootPal[i][j] = 0;
+    for (i = 0; i < 3; i++) {
+        a->bootPal[0][i] = 255;
+        a->bootPal[9][i] = 255;
+        a->bootPal[4][i] = 255;
+    }
+    a->bootPal[BOOT_INK][0] = (unsigned char)(r * 17);
+    a->bootPal[BOOT_INK][1] = (unsigned char)(g * 17);
+    a->bootPal[BOOT_INK][2] = (unsigned char)(b * 17);
+    a->gfx.pal = a->bootPal;
+}
+
+/* FUN_1edb_2c10 divides a square into [0x11e8] / cc_step sub-steps.  cc_step
+ * lives in [0x121b], written by code Ghidra could not reach, and the game
+ * bails out with "cc_step=0 でした!!" if it is ever zero - so it is a speed
+ * setting.  Four pixels gives ten sub-steps on a 40-pixel tile and eight on a
+ * 32-pixel one, which is this port's choice of that setting. */
+#define CC_STEP 4
+
+/* FUN_1edb_2c10 advances the walk frame every third sub-step. */
+#define PHASE_EVERY 3
 
 static unsigned char *slurp(const char *dir, const char *name, long *len)
 {
@@ -80,6 +116,12 @@ int app_init(App *a, const char *dir)
     if (load_cg(&a->select, dir, "SELECT.CG", 4)) return -2;
     if (load_cg(&a->chr, dir, "CHR98N.CG", 4)) return -3;
     if (load_cg(&a->windows, dir, "WINDOWS.CGM", 1)) return -4;
+    if (load_cg(&a->logo, dir, "LOGO.CG", 1)) return -7;
+
+    d = slurp(dir, "FONT.CG", &len);
+    if (!d) return -8;
+    if (font_load(&a->font, d, len)) { free(d); return -9; }
+    free(d);
 
     d = slurp(dir, "SBPMEN.DAT", &len);
     if (!d) return -5;
@@ -87,19 +129,33 @@ int app_init(App *a, const char *dir)
     free(d);
     if (a->stageCount < MEN_STAGES) return -6;
 
-    a->screen = SCR_TITLE;
+    a->screen = SCR_BOOT;
+    a->step = CC_STEP;
     a->pick = 0;
     a->dirty = 1;
-    gfx_palette(&a->gfx, CG_PAL_TITLE);
+    boot_palette(a, 0, 11, 0);
     return 0;
+}
+
+/* DIR_UP/RIGHT/DOWN/LEFT to the original's [0x11bf].  The encoding is at
+ * 1edb:1d65..1daa, where the trace replay turns its two recorded bits into a
+ * facing: not-horizontal and not-positive is 3 with dy = -1, not-horizontal
+ * and positive is 2 with dy = +1, horizontal and not-positive is 0 with
+ * dx = -1, horizontal and positive is 1 with dx = +1. */
+int app_facing(int dir)
+{
+    switch (dir) {
+    case DIR_LEFT: return 0;
+    case DIR_RIGHT: return 1;
+    case DIR_DOWN: return 2;
+    default: return 3;                   /* DIR_UP */
+    }
 }
 
 int app_cell(int x, int y)
 {
     int col, row;
 
-    /* The original's own bounds, strict on both sides: 0x1f < x < 0x260 and
-     * 0x27 < y < 0x17c. */
     if (x <= 0x1f || x >= 0x260 || y <= 0x27 || y >= 0x17c) return 0;
     col = (x - SEL_X0) / SEL_CW;
     row = (y - SEL_Y0) / SEL_CH;
@@ -107,31 +163,69 @@ int app_cell(int x, int y)
     return row * SEL_COLS + col + 1;
 }
 
+int app_busy(const App *a)
+{
+    return a->animLeft > 0;
+}
+
+/* Tick until the slide is over.  Scripted play and the checks need this; a
+ * host with a frame loop never does. */
+void app_settle(App *a)
+{
+    int guard = 0;
+    while (a->animLeft > 0 && guard++ < 4096) app_tick(a);
+}
+
 void app_play(App *a, int stage)
 {
     const Stage *s;
 
     if (stage < 1 || stage > a->stageCount) return;
+    /* FUN_1edb_042c only enters a stage whose record is under 0x3a99. */
+    if (a->record[stage - 1] > SEL_LOCKED) return;
+
     s = &a->stages[stage - 1];
     game_start(&a->game, s, stage);
-    /* FUN_1edb_31c5 picks the size and shifts the board into the middle of
-     * that grid in whole cells, so the origin is a multiple of the tile.
-     * Centring in pixels instead is off by half a tile on the odd boards. */
+    /* FUN_1edb_31c5 picks the size from the board's extent and shifts the
+     * board into the middle of that grid in whole cells, so the origin is
+     * always a multiple of the tile. */
     a->px = s->tilePx;
     a->ox = s->shiftX * a->px;
     a->oy = s->shiftY * a->px;
-    /* FUN_1edb_2bb9 turns a box into 0x1d + [0x3ed7] % 15, and [0x3ed7] comes
-     * from the clock once per stage, so every box in a stage is the same
-     * product.  Keying it to the stage instead keeps a screenshot the same
-     * from run to run. */
+    /* FUN_1edb_2bb9 turns a box into 0x1d + [0x3ed7] % 15 and [0x3ed7] comes
+     * from the clock once a stage, so every box in a stage is the same
+     * product.  Keying it to the stage keeps a screenshot repeatable. */
     a->boxKind = (stage - 1) % T_BOX_KINDS;
+    a->animLeft = 0;
+    a->animTick = 0;
+    a->animDx = 0;
+    a->animDy = 0;
+    a->phase = 0;
+    a->facing = app_facing(DIR_DOWN);
+    a->lastSprite = gfx_man(a->facing, 0, 0);
     a->screen = SCR_PLAY;
     gfx_palette(&a->gfx, CG_PAL_TILES);
     a->dirty = 1;
 }
 
+static void start_slide(App *a, int dir, int pushed)
+{
+    a->facing = app_facing(dir);
+    a->animDx = dir == DIR_RIGHT ? 1 : dir == DIR_LEFT ? -1 : 0;
+    a->animDy = dir == DIR_DOWN ? 1 : dir == DIR_UP ? -1 : 0;
+    a->animPush = pushed;
+    a->animLeft = a->px / a->step;
+    a->animTick = 0;
+}
+
 void app_key(App *a, int key)
 {
+    if (a->screen == SCR_BOOT) {
+        a->screen = SCR_TITLE;
+        gfx_palette(&a->gfx, CG_PAL_TITLE);
+        a->dirty = 1;
+        return;
+    }
     if (a->screen == SCR_TITLE) {
         a->screen = SCR_SELECT;
         gfx_palette(&a->gfx, CG_PAL_TITLE);
@@ -145,23 +239,40 @@ void app_key(App *a, int key)
         else if (key == KEY_UP && a->pick > SEL_COLS) a->pick -= SEL_COLS;
         else if (key == KEY_DOWN && a->pick + SEL_COLS <= MEN_STAGES)
             a->pick += SEL_COLS;
-        else if (key == KEY_ESC) { a->screen = SCR_TITLE; }
+        else if (key == KEY_ESC) a->screen = SCR_TITLE;
         else return;
         a->dirty = 1;
         return;
     }
 
-    /* the board */
+    if (app_busy(a)) return;             /* the original walks, then listens */
+
     switch (key) {
-    case KEY_UP: case KEY_RIGHT: case KEY_DOWN: case KEY_LEFT:
-        game_step(&a->game, key);
+    case KEY_UP: case KEY_RIGHT: case KEY_DOWN: case KEY_LEFT: {
+        int before = a->game.pushes;
+        a->facing = app_facing(key);
+        if (game_step(&a->game, key))
+            start_slide(a, key, a->game.pushes != before);
+        /* Clearing the stage is what stores the record; FUN_2329_05b8 keeps
+         * the step count, and FUN_2329_000d then draws the cell red. */
+        if (game_won(&a->game) && a->game.stage >= 1)
+            a->record[a->game.stage - 1] = a->game.moves;
         break;
-    case KEY_UNDO:
-        game_undo(&a->game);
+    }
+    case KEY_UNDO: {
+        int e = a->game.histLen > 0 ? a->game.hist[a->game.histLen - 1] : -1;
+        if (e >= 0 && game_undo(&a->game)) {
+            /* FUN_1edb_2c10 takes -1 as its first argument to run a step
+             * backwards, so an undo slides the other way. */
+            start_slide(a, e & 3, e & 4 ? 1 : 0);
+            a->animDx = -a->animDx;
+            a->animDy = -a->animDy;
+        }
         break;
+    }
     case KEY_RETRY:
-        game_start(&a->game, a->game.st, a->game.stage);
-        break;
+        app_play(a, a->game.stage);
+        return;
     case KEY_ESC:
         a->screen = SCR_SELECT;
         gfx_palette(&a->gfx, CG_PAL_TITLE);
@@ -183,9 +294,8 @@ void app_move(App *a, int x, int y)
 
 void app_click(App *a, int x, int y)
 {
-    if (a->screen == SCR_TITLE) {
-        a->screen = SCR_SELECT;
-        a->dirty = 1;
+    if (a->screen == SCR_BOOT || a->screen == SCR_TITLE) {
+        app_key(a, KEY_ENTER);
         return;
     }
     if (a->screen == SCR_SELECT) {
@@ -193,9 +303,10 @@ void app_click(App *a, int x, int y)
         if (c) app_play(a, c);
         return;
     }
-    /* On the board a click walks one square towards the pointer, which is how
-     * a mouse-driven Sokoban has to work; the original's own routine for this
-     * is in the part of the code Ghidra could not reach. */
+    if (app_busy(a)) return;
+    /* A click walks one square towards the pointer.  The original is
+     * mouse-driven and its own routine for this is in the part of the code
+     * Ghidra could not reach, so this is the port's reading of it. */
     {
         int cx = (x - a->ox) / a->px;
         int cy = (y - a->oy) / a->px;
@@ -213,81 +324,128 @@ void app_click(App *a, int x, int y)
 void app_tick(App *a)
 {
     a->frame++;
-}
-
-/* One digit out of WINDOWS.CGM, ink where the source bit is clear. */
-static void draw_digit(App *a, int d, int x, int y, int ink)
-{
-    int dy, dx;
-    if (d < 0 || d > 9) return;
-    for (dy = 0; dy < DIGIT_H; dy++)
-        for (dx = 0; dx < DIGIT_W; dx++) {
-            int tx = x + dx, ty = y + dy;
-            if (tx < 0 || ty < 0 || tx >= GFX_W || ty >= GFX_H) continue;
-            if (cg_pixel(&a->windows, d * DIGIT_W + dx, DIGIT_Y + dy)) continue;
-            a->gfx.px[ty][tx] = (unsigned char)ink;
+    if (a->screen == SCR_BOOT) {
+        a->bootTick++;
+        if (a->bootTick < BOOT_GREEN_UNTIL) {
+            /* holding on green */
+        } else if (a->bootTick < BOOT_FADE_UNTIL) {
+            int i = (a->bootTick - BOOT_GREEN_UNTIL) / BOOT_FADE_STEP;
+            if (i > 15) i = 15;
+            boot_palette(a, i, i / 4 + 12, i);
+        } else if (a->bootTick == BOOT_FADE_UNTIL) {
+            boot_palette(a, 0, 0, 0);
+        } else if (a->bootTick >= BOOT_HOLD) {
+            a->screen = SCR_TITLE;
+            gfx_palette(&a->gfx, CG_PAL_TITLE);
         }
-}
-
-static void draw_number(App *a, int n, int x, int y, int ink)
-{
-    char buf[12];
-    int i;
-    snprintf(buf, sizeof buf, "%d", n);
-    for (i = 0; buf[i]; i++)
-        draw_digit(a, buf[i] - '0', x + i * DIGIT_W, y, ink);
-}
-
-static void fill(App *a, int x, int y, int w, int h, int colour)
-{
-    int dy, dx;
-    for (dy = 0; dy < h; dy++) {
-        int ty = y + dy;
-        if (ty < 0 || ty >= GFX_H) continue;
-        for (dx = 0; dx < w; dx++) {
-            int tx = x + dx;
-            if (tx < 0 || tx >= GFX_W) continue;
-            a->gfx.px[ty][tx] = (unsigned char)colour;
+        a->dirty = 1;
+        return;
+    }
+    if (a->animLeft > 0) {
+        /* 1edb:2c9f: a counter runs 0, 1, then resets to -1 and steps the
+         * walk frame, so the frame changes every third sub-step. */
+        if (++a->animTick >= PHASE_EVERY) {
+            a->animTick = 0;
+            a->phase = (a->phase + 1) % 3;
+        }
+        a->animLeft--;
+        a->dirty = 1;
+        if (a->animLeft == 0) {
+            a->lastSprite = gfx_man(a->facing, a->animPush, a->phase);
+            a->animDx = 0;
+            a->animDy = 0;
         }
     }
 }
 
-static void draw_thumb(App *a, int stage, int cx, int cy)
+/* --- lettering ------------------------------------------------------------ */
+
+static void put_glyph(App *a, int style, int glyph, int x, int y, int ink)
 {
-    const Stage *s = &a->stages[stage - 1];
-    int pad = 3, top = DIGIT_H + 1;
-    int availW = SEL_CW - pad * 2, availH = SEL_CH - top - pad;
-    int cell = availW / s->w;
-    int x, y, ox, oy;
-
-    if (availH / s->h < cell) cell = availH / s->h;
-    if (cell < 1) cell = 1;
-    ox = cx + (SEL_CW - s->w * cell) / 2;
-    oy = cy + top + (availH - s->h * cell) / 2;
-
-    for (y = 0; y < s->h; y++)
-        for (x = 0; x < s->w; x++) {
-            int c = -1;
-            if (men_wall(s, x, y)) c = SEL_WALL;
-            else if (men_box(s, x, y)) c = SEL_BOX;
-            else if (men_goal(s, x, y)) c = SEL_GOAL;
-            if (c >= 0) fill(a, ox + x * cell, oy + y * cell, cell, cell, c);
+    int gy, gx;
+    for (gy = 0; gy < FONT_H; gy++)
+        for (gx = 0; gx < FONT_W; gx++) {
+            int tx = x + gx, ty = y + gy;
+            if (tx < 0 || ty < 0 || tx >= GFX_W || ty >= GFX_H) continue;
+            if (!font_ink(&a->font, style, glyph, gx, gy)) continue;
+            a->gfx.px[ty][tx] = (unsigned char)ink;
         }
-    draw_number(a, stage, cx + pad, cy + 1, SEL_INK);
 }
 
+/* FUN_2329_0506: `digits` glyphs, most significant first, 9 pixels apart. */
+static void put_number(App *a, int x, int y, int digits, int value, int style,
+                       int ink)
+{
+    int i, k, p = 1;
+    for (k = 1; k < digits; k++) p *= 10;
+    for (i = 0; i < digits; i++) {
+        int d = p ? value / p : 0;
+        put_glyph(a, style, FONT_DIGIT0 + (d % 10), x + i * FONT_PITCH, y, ink);
+        value -= d * p;
+        p /= 10;
+    }
+}
+
+static void put_text(App *a, int x, int y, const char *s, int style, int ink)
+{
+    int i;
+    for (i = 0; s[i]; i++) {
+        int g = font_glyph((unsigned char)s[i]);
+        if (g >= 0) put_glyph(a, style, g, x + i * FONT_PITCH, y, ink);
+    }
+}
+
+static void fill(App *a, int x0, int y0, int x1, int y1, int colour)
+{
+    int y, x;
+    for (y = y0; y <= y1; y++) {
+        if (y < 0 || y >= GFX_H) continue;
+        for (x = x0; x <= x1; x++) {
+            if (x < 0 || x >= GFX_W) continue;
+            a->gfx.px[y][x] = (unsigned char)colour;
+        }
+    }
+}
+
+/* --- the screens ---------------------------------------------------------- */
+
+static void draw_boot(App *a)
+{
+    int y, x;
+
+    gfx_clear(&a->gfx, BOOT_GROUND);
+    /* LOGO.CG is one plane of 80 bytes by 100 rows, laid in at row 245. */
+    for (y = 0; y < LOGO_ROWS; y++)
+        for (x = 0; x < GFX_W; x++)
+            if (cg_pixel(&a->logo, x, y))
+                a->gfx.px[LOGO_Y + y][x] = BOOT_INK;
+}
+
+/* FUN_2329_000d, cell for cell. */
 static void draw_select(App *a)
 {
     int n;
 
     gfx_blit(&a->gfx, &a->select, 0, 0, GFX_W, GFX_H, 0, 0);
-    /* The picture's white panel is the grid; the thumbnails go on top of it. */
+    fill(a, 0x20, 0x28, 0x25f, 0x17b, SEL_PANEL);
+
     for (n = 1; n <= a->stageCount; n++) {
         int col = (n - 1) % SEL_COLS, row = (n - 1) / SEL_COLS;
-        int cx = SEL_X0 + col * SEL_CW, cy = SEL_Y0 + row * SEL_CH;
-        if (n == a->pick) fill(a, cx, cy, SEL_CW, SEL_CH, SEL_GOAL);
-        else fill(a, cx, cy, SEL_CW, SEL_CH, SEL_GROUND);
-        draw_thumb(a, n, cx, cy);
+        int x0 = col * SEL_CW + SEL_X0, y0 = row * SEL_CH + SEL_Y0;
+        int x1 = col * SEL_CW + 0x7f, y1 = row * SEL_CH + 0x6b;
+        int rec = a->record[n - 1];
+        int done = rec != 0 && rec < SEL_LOCKED;
+
+        fill(a, x0, y0, x1, y1, SEL_EDGE);
+        fill(a, x0 + 1, y0 + 1, x1 - 1, y1 - 1, done ? SEL_DONE : SEL_PANEL);
+        put_number(a, x0 + SEL_NUM_DX, y0 + SEL_NUM_DY, 2, n,
+                   done ? 1 : 0, done ? SEL_PANEL : SEL_EDGE);
+        if (n == a->pick) {
+            fill(a, x0, y0, x1, y0 + 1, SEL_DONE);
+            fill(a, x0, y1 - 1, x1, y1, SEL_DONE);
+            fill(a, x0, y0, x0 + 1, y1, SEL_DONE);
+            fill(a, x1 - 1, y0, x1, y1, SEL_DONE);
+        }
     }
 }
 
@@ -295,38 +453,63 @@ static void draw_play(App *a)
 {
     const Stage *s = a->game.st;
     int x, y;
+    int slide = a->animLeft * a->step;   /* how far back to pull the slide */
+    int mx, my, sprite;
 
     gfx_clear(&a->gfx, PLAY_GROUND);
     for (y = 0; y < s->h; y++)
         for (x = 0; x < s->w; x++) {
             int dx = a->ox + x * a->px, dy = a->oy + y * a->px;
             int t = -1;
+            int sliding = 0;
             gfx_tile(&a->gfx, &a->chr, a->px, T_FLOOR, dx, dy, -1);
             if (men_wall(s, x, y)) t = T_WALL;
-            else if (game_box(&a->game, x, y))
+            else if (game_box(&a->game, x, y)) {
                 t = men_goal(s, x, y) ? T_BOX_ON_GOAL : T_BOX + a->boxKind;
-            else if (men_goal(s, x, y)) t = T_GOAL;
-            if (t >= 0) gfx_tile(&a->gfx, &a->chr, a->px, t, dx, dy, -1);
+                /* The box being pushed is drawn after the board, sliding. */
+                if (a->animLeft > 0 && a->animPush &&
+                    x == a->game.x + a->animDx && y == a->game.y + a->animDy)
+                    sliding = 1;
+            } else if (men_goal(s, x, y)) t = T_GOAL;
+            if (t < 0 || sliding) continue;
+            gfx_tile(&a->gfx, &a->chr, a->px, t, dx, dy, -1);
         }
-    /* The last entry in the history says whether that step was a push, which
-     * is what picks the pushing sprite; the step count drives the phase so
-     * walking cycles as the man goes. */
-    {
-        int pushing = a->game.histLen > 0 &&
-                      (a->game.hist[a->game.histLen - 1] & 4);
-        int t = gfx_man(a->game.facing, pushing, a->game.moves);
+
+    if (a->animLeft > 0 && a->animPush) {
+        int bx = a->game.x + a->animDx, by = a->game.y + a->animDy;
+        int t = men_goal(s, bx, by) ? T_BOX_ON_GOAL : T_BOX + a->boxKind;
         gfx_tile(&a->gfx, &a->chr, a->px, t,
-                 a->ox + a->game.x * a->px, a->oy + a->game.y * a->px, 1);
+                 a->ox + bx * a->px - a->animDx * slide,
+                 a->oy + by * a->px - a->animDy * slide, -1);
     }
 
-    /* STEPS and the stage number, in the corners the SCORE window uses. */
-    draw_number(a, a->game.stage, 8, 8, 0);
-    draw_number(a, a->game.moves, GFX_W - 8 - DIGIT_W * 5, 8, 0);
+    mx = a->ox + a->game.x * a->px - a->animDx * slide;
+    my = a->oy + a->game.y * a->px - a->animDy * slide;
+    sprite = a->animLeft > 0 ? gfx_man(a->facing, a->animPush, a->phase)
+                             : a->lastSprite;
+    gfx_tile(&a->gfx, &a->chr, a->px, sprite, mx, my, 1);
+
+    /* FUN_1edb_3a43 keeps the score panel out of the man's way by hopping it
+     * between (10,10), (0x212,10), (0x212,0x136) and (10,0x136); this puts it
+     * at whichever of those corners the man is furthest from. */
+    {
+        int px = mx < GFX_W / 2 ? 0x212 : 10;
+        int py = my < GFX_H / 2 ? 0x136 : 10;
+        put_text(a, px, py, "STAGE", 0, 0);
+        put_number(a, px + FONT_PITCH * 6, py, 2, a->game.stage, 0, 0);
+        put_text(a, px, py + 12, "STEPS", 0, 0);
+        put_number(a, px + FONT_PITCH * 6, py + 12, 5, a->game.moves, 0, 0);
+        put_text(a, px, py + 24, "LIMIT", 0, 0);
+        put_number(a, px + FONT_PITCH * 6, py + 24, 5, s->moves, 0, 0);
+    }
 }
 
 void app_render(App *a)
 {
     switch (a->screen) {
+    case SCR_BOOT:
+        draw_boot(a);
+        break;
     case SCR_TITLE:
         gfx_blit(&a->gfx, &a->title, 0, 0, GFX_W, GFX_H, 0, 0);
         break;

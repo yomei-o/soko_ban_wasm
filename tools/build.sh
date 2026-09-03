@@ -10,7 +10,7 @@ set -e
 cd "$(dirname "$0")/.."
 
 CC="sh tools/cc.sh -O2 -Wall -Wextra -std=c99 -Isrc"
-CORE="src/cg.c src/men.c src/game.c src/gfx.c src/app.c"
+CORE="src/cg.c src/men.c src/game.c src/gfx.c src/font.c src/app.c"
 
 mkdir -p tmp
 

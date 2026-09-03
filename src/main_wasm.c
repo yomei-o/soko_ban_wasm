@@ -44,6 +44,17 @@ EMSCRIPTEN_KEEPALIVE void soko_tick(void)
     if (ready) app_tick(&app);
 }
 
+/* Run a slide out in one call, for scripted play and for the checks. */
+EMSCRIPTEN_KEEPALIVE void soko_settle(void)
+{
+    if (ready) app_settle(&app);
+}
+
+EMSCRIPTEN_KEEPALIVE int soko_busy(void)
+{
+    return ready ? app_busy(&app) : 0;
+}
+
 /* Render and hand back the pixels.  The palette is whatever screen the app is
  * on, so the conversion has to happen here rather than once at startup. */
 EMSCRIPTEN_KEEPALIVE unsigned char *soko_frame(void)

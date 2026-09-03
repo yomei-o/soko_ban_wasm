@@ -11,7 +11,7 @@ const SokoBan = require(path.join(process.cwd(), 'soko.js'));
 const W = 640, H = 400;
 const KEY = { UP: 0, RIGHT: 1, DOWN: 2, LEFT: 3, UNDO: 4, RETRY: 5, ESC: 6,
               ENTER: 7 };
-const SCR = { TITLE: 0, SELECT: 1, PLAY: 2 };
+const SCR = { BOOT: 0, TITLE: 1, SELECT: 2, PLAY: 3 };
 
 let fails = 0;
 function ok(cond, what) {
@@ -21,7 +21,7 @@ function ok(cond, what) {
 SokoBan().then(M => {
   ok(M._soko_init() === 0, 'the embedded data loads');
   ok(M._soko_width() === W && M._soko_height() === H, '640x400');
-  ok(M._soko_screen() === SCR.TITLE, 'it opens on the title');
+  ok(M._soko_screen() === SCR.BOOT, 'it opens on the loading logo');
 
   // A frame has to be real pixels, not a blank buffer.
   function pixels() {
@@ -40,14 +40,25 @@ SokoBan().then(M => {
   let px = pixels();
   ok(px.length === W * H * 4, 'the frame is the right size');
   let h = histogram(px);
-  ok(h.size > 4, 'the title has more than a handful of colours (' + h.size + ')');
+  // FUN_1edb_000e sets colour 0 to white before dropping LOGO.CG in, so the
+  // loading screen is a white field with the Kao crescent near the bottom.
+  ok(h.size === 2, 'the loading screen is two colours (' + h.size + ')');
+  ok(h.get(0xffffff) > 200000, 'and mostly white');
+
+  // Logo -> title -> select -> a stage.
+  M._soko_key(KEY.ENTER);
+  ok(M._soko_screen() === SCR.TITLE, 'a key leaves the logo');
+  px = pixels();
+  h = histogram(px);
   // TITLE.CG's ground is entry 9 of the wood palette, fd9.
   ok(h.get(0xffdd99) > 150000, 'the title sits on its cream ground');
-
-  // Title -> select -> a stage.
   M._soko_key(KEY.ENTER);
-  ok(M._soko_screen() === SCR.SELECT, 'a key leaves the title');
-  pixels();
+  ok(M._soko_screen() === SCR.SELECT, 'and another leaves the title');
+  px = pixels();
+  h = histogram(px);
+  // FUN_2329_000d fills the panel white and every cell is white until it is
+  // cleared, so the grid is mostly white with black borders and numbers.
+  ok(h.get(0xffffff) > 100000, 'the grid panel is white');
 
   // The grid, exactly as FUN_1edb_042c hit-tests it.
   M._soko_move(32 + 5, 40 + 5);
@@ -70,20 +81,32 @@ SokoBan().then(M => {
   ok(h.get(0xffddbb) > 100000, 'the board sits on colour 3 of the tile palette');
   ok(h.size > 6, 'the board is drawn (' + h.size + ' colours)');
 
-  // Walking and undo, through the wasm rather than the C.
-  M._soko_key(KEY.LEFT);
+  // Walking and undo, through the wasm rather than the C.  A step starts a
+  // slide and the original ignores input until it finishes, so each press is
+  // followed by settling it.
+  function press(k) { M._soko_key(k); M._soko_settle(); }
+
+  press(KEY.LEFT);
   ok(M._soko_moves() === 1, 'a step counts');
-  M._soko_key(KEY.RIGHT);
-  M._soko_key(KEY.RIGHT);
+  ok(M._soko_busy() === 0, 'and the slide has run out');
+  press(KEY.RIGHT);
+  press(KEY.RIGHT);
   ok(M._soko_moves() === 2, 'the wall refuses the third');
-  M._soko_key(KEY.UNDO);
-  M._soko_key(KEY.UNDO);
+  press(KEY.UNDO);
+  press(KEY.UNDO);
   ok(M._soko_moves() === 0, 'undo winds all the way back');
   ok(M._soko_won() === 0, 'not won');
 
+  // A press during a slide is dropped, the way the original drops it.
+  M._soko_key(KEY.LEFT);
+  ok(M._soko_busy() === 1, 'the slide is running');
+  M._soko_key(KEY.LEFT);
+  ok(M._soko_moves() === 1, 'the second press was ignored');
+  M._soko_settle();
+
   // Retry and escape.
-  M._soko_key(KEY.DOWN);
-  M._soko_key(KEY.RETRY);
+  press(KEY.DOWN);
+  press(KEY.RETRY);
   ok(M._soko_moves() === 0, 'retry resets the stage');
   M._soko_key(KEY.ESC);
   ok(M._soko_screen() === SCR.SELECT, 'escape goes back to the grid');
@@ -102,11 +125,22 @@ SokoBan().then(M => {
   // Stage 24 is the one where a single push moves a box off its goal.
   M._soko_play(24);
   const before = M._soko_done();
-  M._soko_key(KEY.RIGHT);
+  press(KEY.RIGHT);
   ok(M._soko_pushes() === 1, 'stage 24: one push');
   ok(M._soko_done() === before - 1, 'the box left its goal');
-  M._soko_key(KEY.UNDO);
+  press(KEY.UNDO);
   ok(M._soko_done() === before && M._soko_pushes() === 0, 'and came back');
+
+  // The solver's answer for stage 1, played through the wasm.  43 moves,
+  // inside the stage's own limit of 71.
+  M._soko_play(1);
+  const RUN = 'uuldllldlurrrrrddllulluldrrrdrrullllrrrulll';
+  const K = { u: KEY.UP, r: KEY.RIGHT, d: KEY.DOWN, l: KEY.LEFT };
+  for (const c of RUN) press(K[c]);
+  ok(M._soko_won() === 1, 'stage 1 is cleared by the solved run');
+  ok(M._soko_moves() === 43, '43 moves');
+  ok(M._soko_moves() <= M._soko_target(), 'inside the limit of ' + M._soko_target());
+  ok(M._soko_done() === M._soko_boxes(), 'every box is home');
 
   if (fails) { console.log(fails + ' checks failed'); process.exit(1); }
   console.log('wasm checks passed');

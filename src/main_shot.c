@@ -107,7 +107,7 @@ int main(int argc, char **argv)
     long len;
 
     if (argc < 3) {
-        fprintf(stderr, "usage: soko_shot screen title|select|<n> <out.png>\n"
+        fprintf(stderr, "usage: soko_shot screen boot|title|select|<n> <out.png>\n"
                         "       soko_shot board <n> <out.png> [--press rrdd]\n"
                         "       soko_shot pic <file.cg> <out.png> [--pal n]\n"
                         "       soko_shot tiles <out.png> [40|32]\n");
@@ -157,7 +157,8 @@ int main(int argc, char **argv)
         const char *which = argv[2];
         int rc = app_init(&app, "disk");
         if (rc) { fprintf(stderr, "app_init failed: %d\n", rc); return 1; }
-        if (!strcmp(which, "title")) app.screen = SCR_TITLE;
+        if (!strcmp(which, "boot")) app.screen = SCR_BOOT;
+        else if (!strcmp(which, "title")) app.screen = SCR_TITLE;
         else if (!strcmp(which, "select")) {
             app.screen = SCR_SELECT;
             app.pick = arg_int(argc, argv, "--pick", 0);
@@ -173,7 +174,11 @@ int main(int argc, char **argv)
                     int key = *k == 'u' ? KEY_UP : *k == 'r' ? KEY_RIGHT :
                               *k == 'd' ? KEY_DOWN : *k == 'l' ? KEY_LEFT :
                               *k == 'z' ? KEY_UNDO : -1;
-                    if (key >= 0) app_key(&app, key);
+                    if (key >= 0) {
+                        app_key(&app, key);
+                        app_settle(&app);   /* the slide finishes before the
+                                             * next press is looked at */
+                    }
                 }
             }
         }

@@ -6,11 +6,11 @@ EMSDK=C:/prog/emsdk/emsdk
 PATH="/c/prog/emsdk/emsdk/node/22.16.0_64bit/bin:$PATH"
 export PATH
 
-CORE="src/cg.c src/men.c src/game.c src/gfx.c src/app.c"
+CORE="src/cg.c src/men.c src/game.c src/gfx.c src/font.c src/app.c"
 
 # Only the files the port actually reads are embedded, so the page stays small.
 EMB=""
-for f in TITLE.CG SELECT.CG CHR98N.CG WINDOWS.CGM SBPMEN.DAT; do
+for f in TITLE.CG SELECT.CG CHR98N.CG WINDOWS.CGM LOGO.CG FONT.CG SBPMEN.DAT; do
     EMB="$EMB --embed-file disk/$f@/disk/$f"
 done
 
