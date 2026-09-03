@@ -73,3 +73,27 @@ void gfx_tile(Gfx *g, const Cg *sheet, int px, int t, int x, int y, int clear)
         }
     }
 }
+
+/* Which sprite the man is.  Rendering tiles 0..30 large and numbering them
+ * with the game's own digits makes the groups plain:
+ *
+ *      0 floor   1 wall   2 box on goal   3 goal   4 box
+ *   5..7  pushing right      19..21 walking right
+ *   8..10 pushing left       22..24 walking left
+ *  11..13 pushing up         25..27 walking up    (the back of the cap)
+ *  16..18 pushing down       28..30 walking down  (the face towards you)
+ *
+ * Row one of the sheet only reaches x = 560, so tiles 14 and 15 are padding
+ * and the "pushing down" group starts row two.  Three frames each, so a phase
+ * of 0..2 picks one.
+ */
+static const int MAN_WALK[4] = { 25, 19, 28, 22 };   /* up right down left */
+static const int MAN_PUSH[4] = { 11, 5, 16, 8 };
+
+int gfx_man(int dir, int pushing, int phase)
+{
+    const int *g = pushing ? MAN_PUSH : MAN_WALK;
+    if (dir < 0 || dir > 3) dir = 0;
+    if (phase < 0) phase = 0;
+    return g[dir] + phase % 3;
+}

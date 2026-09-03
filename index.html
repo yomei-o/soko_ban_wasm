@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>倉庫番 Select 30 (PC-98) — WASM</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; background: #191512; color: #d8cfc4;
+    font: 14px/1.6 system-ui, "Hiragino Kaku Gothic ProN", "Noto Sans JP",
+          sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh;
+  }
+  header { padding: 14px 16px 6px; text-align: center; }
+  h1 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: .02em; }
+  header p { margin: 4px 0 0; font-size: 12px; color: #9c9186; }
+  header a { color: #d8b070; }
+  #wrap {
+    position: relative; width: 100%; max-width: 1280px;
+    padding: 0 8px; box-sizing: border-box;
+  }
+  canvas {
+    display: block; width: 100%; height: auto; max-width: 1280px;
+    margin: 0 auto; background: #000;
+    image-rendering: pixelated;
+    border: 1px solid #3a322b; cursor: pointer;
+  }
+  #bar {
+    display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;
+    padding: 10px 8px 4px;
+  }
+  button {
+    font: inherit; font-size: 12px; padding: 5px 11px;
+    background: #2b2520; color: #d8cfc4;
+    border: 1px solid #4a4038; border-radius: 5px; cursor: pointer;
+  }
+  button:hover { background: #3a322b; }
+  #hud {
+    font-variant-numeric: tabular-nums; font-size: 12px; color: #9c9186;
+    padding: 2px 8px 16px; text-align: center; min-height: 1.6em;
+  }
+  #hud b { color: #d8cfc4; font-weight: 600; }
+  #err { color: #e08a72; padding: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>倉庫番 Select 30 — PC-98 版の移植</h1>
+  <p>Thinking Rabbit / 花王。実機のフロッピーを解析して C で書き直したもの。
+     <a href="https://github.com/yomei-o/soko_ban_wasm">ソース</a></p>
+</header>
+
+<div id="wrap">
+  <canvas id="screen" width="640" height="400"></canvas>
+</div>
+
+<div id="bar">
+  <button data-key="4">戻す (Z)</button>
+  <button data-key="5">やり直し (R)</button>
+  <button data-key="6">面選択 (Esc)</button>
+</div>
+<div id="hud"></div>
+<div id="err"></div>
+
+<script src="soko.js"></script>
+<script>
+(function () {
+  var W = 640, H = 400;
+  var cv = document.getElementById('screen');
+  var cx = cv.getContext('2d', { alpha: false });
+  var hud = document.getElementById('hud');
+  var err = document.getElementById('err');
+  var M = null, img = null;
+
+  // KEY_* in app.h, in order.
+  var KEY = { UP: 0, RIGHT: 1, DOWN: 2, LEFT: 3, UNDO: 4, RETRY: 5,
+              ESC: 6, ENTER: 7 };
+
+  var MAP = {
+    ArrowUp: KEY.UP, ArrowRight: KEY.RIGHT, ArrowDown: KEY.DOWN,
+    ArrowLeft: KEY.LEFT, KeyW: KEY.UP, KeyD: KEY.RIGHT, KeyS: KEY.DOWN,
+    KeyA: KEY.LEFT, KeyZ: KEY.UNDO, Backspace: KEY.UNDO, KeyR: KEY.RETRY,
+    Escape: KEY.ESC, Enter: KEY.ENTER, Space: KEY.ENTER
+  };
+
+  function fail(m) { err.textContent = m; }
+
+  SokoBan().then(function (mod) {
+    M = mod;
+    var rc = M._soko_init();
+    if (rc !== 0) { fail('データを読めませんでした (app_init ' + rc + ')'); return; }
+    img = cx.createImageData(W, H);
+    requestAnimationFrame(frame);
+  }).catch(function (e) { fail('読み込みに失敗しました: ' + e); });
+
+  function frame() {
+    M._soko_tick();
+    var p = M._soko_frame();
+    img.data.set(M.HEAPU8.subarray(p, p + W * H * 4));
+    cx.putImageData(img, 0, 0);
+    status();
+    requestAnimationFrame(frame);
+  }
+
+  function status() {
+    var scr = M._soko_screen();
+    if (scr === 0) { hud.textContent = 'クリックかキーで始めます'; return; }
+    if (scr === 1) {
+      var pick = M._soko_pick();
+      hud.innerHTML = '面を選んでください' +
+        (pick ? ' — <b>' + pick + '</b>' : '');
+      return;
+    }
+    var won = M._soko_won();
+    hud.innerHTML = '面 <b>' + M._soko_stage() + '</b>' +
+      ' / 手数 <b>' + M._soko_moves() + '</b>' +
+      ' (目標 ' + M._soko_target() + ')' +
+      ' / 押した <b>' + M._soko_pushes() + '</b>' +
+      ' / 荷物 <b>' + M._soko_done() + '</b> / ' + M._soko_boxes() +
+      (won ? ' — <b>クリア！</b>' : '');
+  }
+
+  function at(e) {
+    var r = cv.getBoundingClientRect();
+    return {
+      x: Math.round((e.clientX - r.left) * W / r.width),
+      y: Math.round((e.clientY - r.top) * H / r.height)
+    };
+  }
+
+  cv.addEventListener('mousedown', function (e) {
+    if (!M) return;
+    var p = at(e);
+    M._soko_click(p.x, p.y);
+    e.preventDefault();
+  });
+
+  cv.addEventListener('mousemove', function (e) {
+    if (!M) return;
+    var p = at(e);
+    M._soko_move(p.x, p.y);
+  });
+
+  window.addEventListener('keydown', function (e) {
+    if (!M) return;
+    var k = MAP[e.code];
+    if (k === undefined) return;
+    M._soko_key(k);
+    e.preventDefault();
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll('#bar button'),
+    function (b) {
+      b.addEventListener('click', function () {
+        if (M) M._soko_key(parseInt(b.dataset.key, 10));
+        cv.focus();
+      });
+    });
+})();
+</script>
+</body>
+</html>

@@ -39,7 +39,11 @@ enum {
     T_BOX_ON_GOAL = 2,
     T_GOAL = 3,
     T_BOX = 4,
-    T_MAN = 5                            /* the first of the walking frames */
+    T_MAN = 5                            /* the first of the pushing frames */
 };
+
+/* The man's sprite: direction 0..3 as DIR_*, `pushing` when a box came along,
+ * `phase` cycling 0..2.  The groups are laid out in gfx.c. */
+int gfx_man(int dir, int pushing, int phase);
 
 #endif

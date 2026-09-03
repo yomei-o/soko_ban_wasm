@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "app.h"
 #include "cg.h"
 #include "game.h"
 #include "gfx.h"
@@ -102,7 +103,8 @@ int main(int argc, char **argv)
     long len;
 
     if (argc < 3) {
-        fprintf(stderr, "usage: soko_shot board <n> <out.png> [--press rrdd]\n"
+        fprintf(stderr, "usage: soko_shot screen title|select|<n> <out.png>\n"
+                        "       soko_shot board <n> <out.png> [--press rrdd]\n"
                         "       soko_shot pic <file.cg> <out.png> [--pal n]\n"
                         "       soko_shot tiles <out.png> [40|32]\n");
         return 2;
@@ -143,6 +145,37 @@ int main(int argc, char **argv)
         }
         if (save(argv[2], &g)) { fprintf(stderr, "cannot write %s\n", argv[2]); return 1; }
         printf("tiles %d -> %s\n", px, argv[2]);
+        return 0;
+    }
+
+    if (!strcmp(argv[1], "screen")) {
+        static App app;
+        const char *which = argv[2];
+        int rc = app_init(&app, "disk");
+        if (rc) { fprintf(stderr, "app_init failed: %d\n", rc); return 1; }
+        if (!strcmp(which, "title")) app.screen = SCR_TITLE;
+        else if (!strcmp(which, "select")) {
+            app.screen = SCR_SELECT;
+            app.pick = arg_int(argc, argv, "--pick", 0);
+        } else {
+            int n = atoi(which);
+            app_play(&app, n ? n : 1);
+        }
+        {
+            const char *keys = arg_str(argc, argv, "--press");
+            if (keys) {
+                const char *k;
+                for (k = keys; *k; k++) {
+                    int key = *k == 'u' ? KEY_UP : *k == 'r' ? KEY_RIGHT :
+                              *k == 'd' ? KEY_DOWN : *k == 'l' ? KEY_LEFT :
+                              *k == 'z' ? KEY_UNDO : -1;
+                    if (key >= 0) app_key(&app, key);
+                }
+            }
+        }
+        app_render(&app);
+        if (save(argv[3], &app.gfx)) { fprintf(stderr, "cannot write\n"); return 1; }
+        printf("screen %s -> %s\n", which, argv[3]);
         return 0;
     }
 

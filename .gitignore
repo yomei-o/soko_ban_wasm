@@ -9,7 +9,7 @@ tmp/
 *.obj
 *.exe
 !disk/SBP98.EXE
-*.wasm
+
 *.pyc
 __pycache__/
 ghidra_proj/
