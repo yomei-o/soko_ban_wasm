@@ -240,22 +240,14 @@ void app_music(App *a, int n)
     if (n == a->song && a->mmd.playing) return;
     mmd2_play(&a->mmd, a->bgm[n], a->bgmLen[n], a->voi, a->voiLen);
     a->song = n;
+    a->audioAcc = 0;
 }
 
 void app_audio(App *a, short *out, int frames, int rate)
 {
-    int chunk = rate / MMD2_TICK_HZ;
-    int done = 0;
-
-    if (chunk < 1) chunk = 1;
-    while (done < frames) {
-        int n = frames - done < chunk ? frames - done : chunk;
-        mmd2_tick(&a->mmd);
-        mmd2_render(&a->mmd, out + done, n, rate);
-        done += n;
-    }
-    /* The songs stop when every track runs out; the original loops them with
-     * code 252, and the ones that do not are restarted here. */
+    mmd2_run(&a->mmd, out, frames, rate, &a->audioAcc);
+    /* Every track opens with an endless loop, so a song that stops has really
+     * run out; restarting keeps the screen from going quiet. */
     if (!a->mmd.playing && a->song >= 0) {
         int n = a->song;
         a->song = -1;
@@ -534,14 +526,6 @@ static void put_number(App *a, int x, int y, int digits, int value, int style,
     }
 }
 
-static void put_text(App *a, int x, int y, const char *s, int style, int ink)
-{
-    int i;
-    for (i = 0; s[i]; i++) {
-        int g = font_glyph((unsigned char)s[i]);
-        if (g >= 0) put_glyph(a, style, g, x + i * FONT_PITCH, y, ink);
-    }
-}
 
 static void fill(App *a, int x0, int y0, int x1, int y1, int colour)
 {
@@ -601,6 +585,31 @@ static void draw_select(App *a)
     }
 }
 
+/* FUN_1edb_3907: a white 100x80 panel, the SCORE window art from
+ * WINDOWS.CGM on top of it, and the three numbers punched in. */
+static void draw_score(App *a, int x, int y)
+{
+    int dy, dx;
+
+    fill(a, x, y, x + SCORE_W - 1, y + SCORE_H - 1, SEL_PANEL);
+    for (dy = 0; dy < SCORE_H; dy++)
+        for (dx = 0; dx < SCORE_W; dx++) {
+            int tx = x + dx, ty = y + dy;
+            if (tx < 0 || ty < 0 || tx >= GFX_W || ty >= GFX_H) continue;
+            /* WINDOWS.CGM is one plane drawn ink-on-white, so a clear bit is
+             * the ink. */
+            if (cg_pixel(&a->windows, SCORE_SRC_X + dx, SCORE_SRC_Y + dy))
+                continue;
+            a->gfx.px[ty][tx] = SEL_EDGE;
+        }
+    put_number(a, x + SCORE_STAGE_X, y + SCORE_STAGE_Y, 3, a->game.stage,
+               0, SEL_EDGE);
+    put_number(a, x + SCORE_STEPS_X, y + SCORE_STEPS_Y, 5, a->game.moves,
+               0, SEL_EDGE);
+    put_number(a, x + SCORE_LIMIT_X, y + SCORE_LIMIT_Y, 5,
+               a->game.st ? a->game.st->moves : 0, 0, SEL_EDGE);
+}
+
 static void draw_play(App *a)
 {
     const Stage *s = a->game.st;
@@ -641,19 +650,10 @@ static void draw_play(App *a)
                              : a->lastSprite;
     gfx_tile(&a->gfx, &a->chr, a->px, sprite, mx, my, 1);
 
-    /* FUN_1edb_3a43 keeps the score panel out of the man's way by hopping it
+    /* FUN_1edb_3a43 keeps the score window out of the man's way by hopping it
      * between (10,10), (0x212,10), (0x212,0x136) and (10,0x136); this puts it
      * at whichever of those corners the man is furthest from. */
-    {
-        int px = mx < GFX_W / 2 ? 0x212 : 10;
-        int py = my < GFX_H / 2 ? 0x136 : 10;
-        put_text(a, px, py, "STAGE", 0, 0);
-        put_number(a, px + FONT_PITCH * 6, py, 2, a->game.stage, 0, 0);
-        put_text(a, px, py + 12, "STEPS", 0, 0);
-        put_number(a, px + FONT_PITCH * 6, py + 12, 5, a->game.moves, 0, 0);
-        put_text(a, px, py + 24, "LIMIT", 0, 0);
-        put_number(a, px + FONT_PITCH * 6, py + 24, 5, s->moves, 0, 0);
-    }
+    draw_score(a, mx < GFX_W / 2 ? 0x212 : 10, my < GFX_H / 2 ? 0x136 : 10);
 }
 
 void app_render(App *a)

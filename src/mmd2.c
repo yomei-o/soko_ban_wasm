@@ -56,29 +56,30 @@ static void load_voice(Mmd2 *m, int ch, int n)
     }
 }
 
-/* The carrier operators of each algorithm, so a volume can be applied without
- * wrecking the modulators.  The driver leaves the voice's own total levels in
- * place and scales through 0xda4; putting that on the carriers only is what
- * makes the scale audible rather than a timbre change. */
+/* Which operators are carriers, per algorithm.  MMD2.SYS 0x093b picks the
+ * registers to write by the same three-way split: algorithms 0..3 touch only
+ * 0x4c + ch, which is operator 4; 4 is two carriers; 5 and 6 are three; 7 is
+ * all four. */
 static const unsigned char CARRIERS[8] = {
     0x08, 0x08, 0x08, 0x08, 0x0c, 0x0e, 0x0e, 0x0f
 };
 
+/* The volume goes through 0xda4 to a total level and that level is WRITTEN to
+ * the carrier, not added to the voice's own - 0x0960 passes the table value
+ * straight to the register write.  Adding it instead made every note quieter
+ * than it should be and flattened the dynamics. */
 static void fm_level(Mmd2 *m, int ch, int voice, int vol)
 {
     const unsigned char *v;
-    int alg, k, add;
+    int alg, k, tl;
 
     if (!m->voi || voice < 0 || voice >= MMD2_VOICES) return;
     if (VOI_FM + (long)(voice + 1) * MMD2_VOICE_BYTES > m->voiLen) return;
     v = m->voi + VOI_FM + voice * MMD2_VOICE_BYTES;
     alg = v[0] & 7;
-    add = mmd2Tl[15] - mmd2Tl[vol & 15];   /* louder volume, smaller offset */
+    tl = mmd2Tl[vol & 15];
     for (k = 0; k < 4; k++) {
-        int tl;
         if (!((CARRIERS[alg] >> k) & 1)) continue;
-        tl = (v[1 + 4 + k] & 0x7f) + add;
-        if (tl > 0x7f) tl = 0x7f;
         reg(m, 0x40 + ch + k * 4, tl);
     }
 }
@@ -170,7 +171,7 @@ int mmd2_play(Mmd2 *m, const unsigned char *song, long songLen,
         tr->octave = 4;
         tr->noise = -1;
         tr->voice = -1;
-        tr->loopBack = -1;
+        tr->loopTop = 0;
         found++;
         while (p < songLen) {
             unsigned char c = song[p++];
@@ -204,12 +205,20 @@ static int step_code(Mmd2 *m, int t)
         if (!(tr->flags & 0x40)) key_off(m, t);
         key_on(m, t, n);
         tr->count = tr->len;
+        /* 0x080a: the key-off point is length * q / 8, computed as
+         * (len << 8) >> 3 times q, keeping the high byte. */
+        tr->gate = (tr->len * 32 * (tr->flags & 7)) >> 8;
         return 1;
     }
     n -= 36;
     if (n < 1) {                         /* 37  rest */
         key_off(m, t);
         tr->count = tr->len;
+        tr->gate = 0;
+        /* 0x0697: a rest adds 0x40 to the flags, so a tie that was set turns
+         * bit 7 on, and the routine then clears bit 7 - which leaves both
+         * gone.  A rest cancels a tie. */
+        tr->flags &= ~0x40;
         return 1;
     }
     n -= 1;
@@ -237,14 +246,32 @@ static int step_code(Mmd2 *m, int t)
         return 0;
     }
     n -= 32;
-    if (n < 16) return 0;                                 /* 98..113 */
-    n -= 16;
-    if (n < 1) {                                          /* 114  loop */
-        if (tr->loopBack < 0) {
-            tr->loopBack = tr->p;
-        } else if (tr->loopCount > 0 && --tr->loopCount > 0) {
-            tr->p = tr->loopBack;
+    if (n < 16) {                                         /* 98..113 */
+        /* 0x0747: push a frame.  The count is the offset in the range and 0
+         * means for ever, which is what every track's opening 0x62 asks for. */
+        if (tr->loopTop < MMD2_LOOPS) {
+            tr->loopCount[tr->loopTop] = n;
+            tr->loopBack[tr->loopTop] = tr->p;
+            tr->loopTop++;
         }
+        return 0;
+    }
+    n -= 16;
+    if (n < 1) {                                          /* 114  loop end */
+        /* 0x076a: count 0 always goes back; otherwise count down and pop the
+         * frame when it reaches zero. */
+        int top = tr->loopTop - 1;
+        if (top < 0) return 0;
+        if (tr->loopCount[top] == 0) {
+            tr->p = tr->loopBack[top];
+            return 1;                    /* one jump a tick, so an empty loop
+                                          * cannot spin */
+        }
+        if (--tr->loopCount[top] > 0) {
+            tr->p = tr->loopBack[top];
+            return 1;
+        }
+        tr->loopTop = top;
         return 0;
     }
     n -= 1;
@@ -315,6 +342,11 @@ void mmd2_tick(Mmd2 *m)
         int guard = 0;
         if (!tr->active) continue;
         if (tr->count > 0) tr->count--;
+        /* 0x0584: the note is released when what is left of it reaches the
+         * gate point.  A gate of nought only releases on the FM side - the
+         * SSG holds until the next note. */
+        if (tr->count == tr->gate && (tr->gate != 0 || t < MMD2_FM))
+            key_off(m, t);
         while (tr->count == 0 && tr->active && guard++ < 256)
             if (step_code(m, t)) break;
     }
@@ -330,4 +362,31 @@ void mmd2_render(Mmd2 *m, short *out, int samples, int rate)
     for (k = 0; k < samples; k++) out[k] = 0;
     ssg_render(&m->ssg, out, samples, rate);
     opn_render(&m->opn, out, samples, rate);
+}
+
+/* Timer B fires every MMD2_TIMER_DIV chip cycles, so a tick is
+ * rate * MMD2_TIMER_DIV / MMD2_CLOCK samples - not a whole number, so `acc`
+ * carries the remainder in 256ths across calls. */
+void mmd2_run(Mmd2 *m, short *out, long frames, int rate, long *acc)
+{
+    /* In double, not integers: rate * MMD2_TIMER_DIV * 256 is 2.1e11 at
+     * 44.1 kHz, which overflows a 32-bit long and made the ticking nonsense. */
+    long spt = (long)((double)rate * (double)MMD2_TIMER_DIV * 256.0
+                      / (double)MMD2_CLOCK);
+    long done = 0;
+
+    if (spt < 256) spt = 256;
+    while (done < frames) {
+        long n;
+        if (*acc <= 0) {
+            mmd2_tick(m);
+            *acc += spt;
+        }
+        n = (*acc + 255) / 256;
+        if (n > frames - done) n = frames - done;
+        if (n < 1) n = 1;
+        mmd2_render(m, out + done, (int)n, rate);
+        *acc -= n * 256;
+        done += n;
+    }
 }

@@ -43,18 +43,11 @@ static unsigned char *slurp(const char *path, long *len)
     return b;
 }
 
-/* Render `frames`, ticking the driver at MMD2_TICK_HZ as the timer would. */
+/* Render `frames` at the timer's real rate. */
 static void run(Mmd2 *m, short *out, long frames)
 {
-    long done = 0;
-    int chunk = RATE / MMD2_TICK_HZ;
-    if (chunk < 1) chunk = 1;
-    while (done < frames) {
-        long n = frames - done < chunk ? frames - done : chunk;
-        mmd2_tick(m);
-        mmd2_render(m, out + done, (int)n, RATE);
-        done += n;
-    }
+    long acc = 0;
+    mmd2_run(m, out, frames, RATE, &acc);
 }
 
 static double rms(const short *p, long n)

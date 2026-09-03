@@ -42,6 +42,26 @@
  * to a musical tick. */
 #define MMD2_TEMPO_ADD 0x40
 
+/* The interrupt rate is not a guess: MMD2.SYS 0x0202 writes
+ *
+ *     register 0x26 = 0xf0        timer B's period
+ *     register 0x27 = 0x3a        load timer B, enable its interrupt
+ *
+ * and a YM2203's timer B runs at clock / (1152 * (256 - N)), so
+ * 3993600 / (1152 * 16) = 216.67 Hz.  With four interrupts to a musical tick
+ * that is 54.17 ticks a second, and since a whole note is 96 ticks (a length
+ * byte of `fe 60`) a crotchet lands at 135 BPM.
+ *
+ * The first pass at this guessed 600 Hz, which played everything at nearly
+ * three times speed. */
+#define MMD2_TIMER_B 0xf0
+#define MMD2_CLOCK 3993600L
+#define MMD2_TIMER_DIV (1152L * (256 - MMD2_TIMER_B))
+
+/* How many loop frames a track can nest.  1edb... MMD2.SYS 0x0747 shifts a
+ * twelve-byte area by three to make room, so four. */
+#define MMD2_LOOPS 4
+
 typedef struct {
     int active;
     long p;                             /* +0x01, the position in the song */
@@ -56,8 +76,13 @@ typedef struct {
     int noise;                          /* the SSG's noise period, or -1 */
     int voice;                          /* +0x14, the FM voice number */
     int mode;                           /* +0x15, the modulation mode */
-    int loopCount;                      /* +0x1c */
-    long loopBack;                      /* +0x1d */
+    /* +0x1c: a stack of (count, pointer).  Code 98 + n starts a loop that
+     * runs n times, with 0 meaning for ever, and code 114 ends one - which is
+     * how every song loops: each track opens with 0x62 (98, count 0) and
+     * closes with 0x72 0x00 (114 then the terminator). */
+    int loopCount[MMD2_LOOPS];
+    long loopBack[MMD2_LOOPS];
+    int loopTop;
 } Mmd2Track;
 
 typedef struct {
@@ -86,15 +111,13 @@ void mmd2_stop(Mmd2 *m);
 /* One OPN timer interrupt. */
 void mmd2_tick(Mmd2 *m);
 
-/* Mix `samples` frames.  The caller runs mmd2_tick at MMD2_TICK_HZ. */
+/* Mix `samples` frames without ticking.  Use mmd2_run unless the ticking is
+ * being driven from outside. */
 void mmd2_render(Mmd2 *m, short *out, int samples, int rate);
 
-/* The tick rate the OPN timer is left at.  The driver writes register 0x27 =
- * 0x2a to enable and clear both timers but the period registers are set
- * outside the code Ghidra and tools/mmdis.py could reach, so this is the
- * port's choice: 600 Hz gives 150 musical ticks a second, which puts a
- * 12-tick sixteenth at 8 a second - a brisk but ordinary tempo. */
-#define MMD2_TICK_HZ 600
+/* Tick at the timer's real rate and render, keeping the fraction of a sample
+ * between calls in `acc`. */
+void mmd2_run(Mmd2 *m, short *out, long frames, int rate, long *acc);
 
 extern const unsigned short mmd2Fnum[MMD2_NOTES];
 extern const unsigned short mmd2Period[MMD2_NOTES];

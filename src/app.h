@@ -76,6 +76,30 @@
 #define LOGO_B_STEPS 90
 #define LOGO_PLANE (LOGO_STRIDE * GFX_H)
 
+/* FUN_1edb_3907's score window: 100 x 80, white, with the SCORE panel out of
+ * WINDOWS.CGM on top and three numbers punched into it.
+ *
+ *     getimage(x, y, x+99, y+0x4f)                     save the background
+ *     setfillstyle(SOLID, 0x0f); bar(x, y, x+99, y+0x4f)
+ *     putimage(x, y, the window art)
+ *     FUN_2329_0506(x+0x3d, y+0x19, 3, stage)
+ *     FUN_2329_0506(x+0x06, y+0x2b, 5, steps)
+ *     FUN_2329_0506(x+0x32, y+0x3d, 5, limit)
+ *
+ * The art is at (504, 0) in WINDOWS.CGM - the ink there is exactly 100 columns
+ * wide and 80 rows tall, which is the window.  FUN_1edb_3a43 hops it between
+ * the four corners as the man gets close. */
+#define SCORE_W 100
+#define SCORE_H 80
+#define SCORE_SRC_X 504
+#define SCORE_SRC_Y 0
+#define SCORE_STAGE_X 0x3d
+#define SCORE_STAGE_Y 0x19
+#define SCORE_STEPS_X 0x06
+#define SCORE_STEPS_Y 0x2b
+#define SCORE_LIMIT_X 0x32
+#define SCORE_LIMIT_Y 0x3d
+
 enum { SCR_BOOT, SCR_TITLE, SCR_SELECT, SCR_PLAY };
 
 /* Which song goes where, from the four FUN_24d7_001d(n) call sites.  That
@@ -123,6 +147,7 @@ typedef struct {
     long bgmLen[BGM_COUNT];
     int song;                             /* which one is playing, or -1 */
     int music;                            /* [0x128d]: is BGM on at all */
+    long audioAcc;                        /* the fraction of a tick carried */
     int bootPhase;                        /* 0..5, the sequence below */
     int bootStep;                         /* steps done inside a phase */
 
