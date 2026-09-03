@@ -113,6 +113,7 @@ EMSCRIPTEN_KEEPALIVE int soko_done(void) { return app.game.done; }
 EMSCRIPTEN_KEEPALIVE int soko_boxes(void) { return app.game.boxes; }
 EMSCRIPTEN_KEEPALIVE int soko_won(void) { return game_won(&app.game); }
 EMSCRIPTEN_KEEPALIVE int soko_result(void) { return app.result; }
+EMSCRIPTEN_KEEPALIVE int soko_over_step(void) { return app.overStep; }
 
 EMSCRIPTEN_KEEPALIVE void soko_play(int stage)
 {

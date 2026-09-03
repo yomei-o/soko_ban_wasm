@@ -137,6 +137,35 @@ enum { SCR_BOOT, SCR_TITLE, SCR_SELECT, SCR_PLAY };
 #define BGM_END 1
 #define BGM_COUNT 6
 
+/* FUN_23b0_0440 does not blit the clear picture on: it dissolves it in.
+ *
+ *     ax = 0
+ *   outer:
+ *     bx = ax
+ *     inner:
+ *       out 0xa6, 1                    read the page the picture is on
+ *       cx = the OR of the four planes' words at [bx]
+ *       out 0xa6, 0                    back to the visible page
+ *       not cx                         where the picture is blank
+ *       each plane: [bx] &= cx ; [bx] |= its word
+ *       bx += 0x2a                     42 bytes on
+ *     while bx < 0x8000
+ *     ax += 2
+ *   while ax != 0x2a                   21 passes, starting 0, 2, 4 ... 40
+ *
+ * So it lands one word in every 42 bytes, twenty-one passes covering every
+ * word in the end.  42 bytes is a bit over half a row, so each pass paints a
+ * sparse diagonal scatter and the picture fills in.  Colour 0 is what "blank"
+ * means - the OR of the four planes - which is why CLEAR.CG's cloud is drawn
+ * in colour 1 rather than 0, even though the tile palette has both black.
+ *
+ * (CLEARM.CG and PEKEM.CG are not masks.  They are the monochrome versions of
+ * the same pictures, for the 8-colour path at FUN_23b0_04bc.) */
+#define OVER_PASSES 21
+#define OVER_STRIDE 42
+#define OVER_FRAMES 2                    /* frames a pass; the original's speed
+                                          * is whatever the VRAM allows */
+
 /* What a stage ended as.  FUN_1edb_3182 == 0 is a clear; the steps reaching
  * the limit at 1edb:14bb is a failure. */
 enum { RESULT_PLAYING, RESULT_CLEAR, RESULT_FAIL };
@@ -181,6 +210,8 @@ typedef struct {
     int ox, oy;
     int boxKind;                         /* which of the fifteen packages */
     int result;                          /* RESULT_* */
+    int overStep;                        /* how much of the picture is in */
+    int overTick;
 
     /* FUN_1edb_2c10's slide.  A move is committed to the model at once and
      * then drawn pulled back by what is left of it, which puts the same

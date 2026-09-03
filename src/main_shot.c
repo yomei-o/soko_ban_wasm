@@ -171,6 +171,7 @@ int main(int argc, char **argv)
             app_play(&app, n ? n : 1);
         }
         {
+            int extra = arg_int(argc, argv, "--ticks", 0);
             const char *keys = arg_str(argc, argv, "--press");
             if (keys) {
                 const char *k;
@@ -185,6 +186,7 @@ int main(int argc, char **argv)
                     }
                 }
             }
+            while (extra-- > 0) app_tick(&app);
         }
         app_render(&app);
         if (save(argv[3], &app.gfx)) { fprintf(stderr, "cannot write\n"); return 1; }

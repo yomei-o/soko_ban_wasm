@@ -67,13 +67,29 @@ typedef struct {
     long p;                             /* +0x01, the position in the song */
     int count;                          /* +0x00, the remaining length */
     int len;                            /* +0x03, the current length */
-    int fnum, high;                     /* +0x04, +0x05 */
+    int pitch;                          /* +0x04 as one word: the FM F-number
+                                         * or the SSG period */
+    int high;                           /* +0x05's spare bits (SSG noise) */
     int octave;                         /* +0x06 */
     int vol;                            /* +0x07, 0..15 */
     int level;                          /* +0x08 */
     int gate;                           /* +0x09 */
     int flags;                          /* +0x0a: 0x40 tie, low 3 bits q */
     int noise;                          /* the SSG's noise period, or -1 */
+
+    /* Range 9 (codes 115..130), the level envelope.  0x078f copies a 3-byte
+     * preset out of .VOI+0x00 into +0x0b..+0x0e and saves the level in +0x0f,
+     * and 0x05a5 walks it: every `period` ticks the level moves by `delta`,
+     * stopping at `limit`.  Because +0x08 is the level - the volume codes put
+     * 0xda4's table value there - this is a software envelope, not a vibrato. */
+    int lvlCount, lvlPeriod, lvlLimit, lvlDelta, lvlSaved;
+
+    /* Range 10 (codes 131..146), the pitch slide.  0x07b8 copies its preset
+     * into +0x10..+0x13 and 0x05e6 walks it: every `period` ticks the pitch
+     * word gains a signed 16-bit `delta`, with no limit, until the next note
+     * clears the counter at 0x0603. */
+    int sldCount, sldPeriod, sldDelta;
+
     int voice;                          /* +0x14, the FM voice number */
     int mode;                           /* +0x15, the modulation mode */
     /* +0x1c: a stack of (count, pointer).  Code 98 + n starts a loop that

@@ -64,24 +64,84 @@ static const unsigned char CARRIERS[8] = {
     0x08, 0x08, 0x08, 0x08, 0x0c, 0x0e, 0x0e, 0x0f
 };
 
-/* The volume goes through 0xda4 to a total level and that level is WRITTEN to
- * the carrier, not added to the voice's own - 0x0960 passes the table value
- * straight to the register write.  Adding it instead made every note quieter
- * than it should be and flattened the dynamics. */
-static void fm_level(Mmd2 *m, int ch, int voice, int vol)
+/* 0x08a8's FM half, at 0x093b: put the level on the carriers.
+ *
+ * A single-carrier algorithm (0..3) takes the level straight - 0x0959 sends it
+ * to register 0x4c + ch and nothing else.  The others (0x0965, 0x0978, 0x0994)
+ * first take the SMALLEST of the carriers' own total levels out of the voice,
+ * then write `voiceTl + (level - smallest)` to each of them: the carriers keep
+ * whatever balance the voice gave them and the loudest of them lands exactly
+ * on the level.
+ *
+ * Writing the level to every carrier instead - which is what this did at first
+ * - makes a three-carrier voice far louder than its volume asks for. */
+static void fm_level(Mmd2 *m, int ch, int voice, int level)
 {
     const unsigned char *v;
-    int alg, k, tl;
+    int alg, k, lowest = 0x7f, off;
 
     if (!m->voi || voice < 0 || voice >= MMD2_VOICES) return;
     if (VOI_FM + (long)(voice + 1) * MMD2_VOICE_BYTES > m->voiLen) return;
     v = m->voi + VOI_FM + voice * MMD2_VOICE_BYTES;
     alg = v[0] & 7;
-    tl = mmd2Tl[vol & 15];
+
+    if (alg < 4) {                       /* 0x0959 */
+        reg(m, 0x4c + ch, level & 0x7f);
+        return;
+    }
+    for (k = 0; k < 4; k++)
+        if (((CARRIERS[alg] >> k) & 1) && (v[5 + k] & 0x7f) < lowest)
+            lowest = v[5 + k] & 0x7f;
+    off = level - lowest;
     for (k = 0; k < 4; k++) {
+        int tl;
         if (!((CARRIERS[alg] >> k) & 1)) continue;
+        tl = (v[5 + k] & 0x7f) + off;
+        if (tl < 0) tl = 0;
+        if (tl > 0x7f) tl = 0x7f;
         reg(m, 0x40 + ch + k * 4, tl);
     }
+}
+
+/* 0x08a8 as a whole: the level out to whichever half of the chip the track
+ * lives on. */
+static void apply_level(Mmd2 *m, int t)
+{
+    Mmd2Track *tr = &m->tr[t];
+    if (t < MMD2_FM) fm_level(m, t, tr->voice, tr->level);
+    else reg(m, 8 + (t - MMD2_FM), tr->level & 15);
+}
+
+/* 0x09f6: the pitch word out.  For FM register 0xa4 + ch takes
+ * (octave << 3) | the F-number's high bits and 0xa0 + ch the low byte; for the
+ * SSG it is the period, low byte then high nibble. */
+static void write_pitch(Mmd2 *m, int t)
+{
+    Mmd2Track *tr = &m->tr[t];
+    if (t < MMD2_FM) {
+        reg(m, 0xa4 + t, ((tr->octave & 7) << 3) | ((tr->pitch >> 8) & 7));
+        reg(m, 0xa0 + t, tr->pitch & 0xff);
+    } else {
+        int ch = t - MMD2_FM;
+        int p = tr->pitch;
+        if (p < 1) p = 1;
+        if (p > 0xfff) p = 0xfff;
+        reg(m, ch * 2, p & 0xff);
+        reg(m, ch * 2 + 1, (p >> 8) & 0x0f);
+    }
+}
+
+/* 0x06bf: the volume goes into +0x07, the level into +0x08 - through 0xda4's
+ * table on the FM side and raw on the SSG side - and the envelope counters are
+ * cleared. */
+static void set_volume(Mmd2 *m, int t, int vol)
+{
+    Mmd2Track *tr = &m->tr[t];
+    tr->vol = vol & 15;
+    tr->level = t < MMD2_FM ? mmd2Tl[tr->vol] : tr->vol;
+    tr->lvlCount = 0;
+    tr->lvlPeriod = 0;
+    (void)m;
 }
 
 static void key_off(Mmd2 *m, int t)
@@ -106,23 +166,17 @@ static void key_on(Mmd2 *m, int t, int note)
 
     if (note < 0 || note >= MMD2_NOTES) return;
     if (t < MMD2_FM) {
-        int f = mmd2Fnum[note];
-        /* 0x09f6: register 0xa4 + ch takes (octave << 3) | the F-number's
-         * high bits, and 0xa0 + ch the low byte. */
-        tr->fnum = f & 0xff;
-        tr->high = (f >> 8) & 7;
-        reg(m, 0xa4 + t, ((tr->octave & 7) << 3) | tr->high);
-        reg(m, 0xa0 + t, tr->fnum);
-        fm_level(m, t, tr->voice, tr->vol);
+        tr->pitch = mmd2Fnum[note];
+        write_pitch(m, t);
+        apply_level(m, t);
         reg(m, 0x28, 0xf0 | t);          /* all four operators on */
     } else {
         int ch = t - MMD2_FM;
-        int p = mmd2Period[note] >> (tr->octave & 7);
-        if (p < 1) p = 1;
-        if (p > 0xfff) p = 0xfff;
-        reg(m, ch * 2, p & 0xff);
-        reg(m, ch * 2 + 1, (p >> 8) & 0x0f);
-        reg(m, 8 + ch, tr->vol & 15);
+        /* 0x064f: the SSG period is the table entry shifted down by the
+         * octave, rounded up. */
+        tr->pitch = mmd2Period[note] >> (tr->octave & 7);
+        write_pitch(m, t);
+        apply_level(m, t);
         /* Tone on; noise on as well when a noise period has been set. */
         m->mixer &= ~(1 << ch);
         if (tr->noise >= 0) {
@@ -168,6 +222,7 @@ int mmd2_play(Mmd2 *m, const unsigned char *song, long songLen,
         tr->count = 1;                   /* fetch on the first tick */
         tr->len = 12;
         tr->vol = 15;
+        tr->level = t < MMD2_FM ? mmd2Tl[15] : 15;
         tr->octave = 4;
         tr->noise = -1;
         tr->voice = -1;
@@ -209,7 +264,7 @@ static int step_code(Mmd2 *m, int t)
         /* 0x080a: the key-off point is length * q / 8, computed as
          * (len << 8) >> 3 times q, keeping the high byte. */
         tr->gate = (tr->len * 32 * (tr->flags & 7)) >> 8;
-        return 1;
+        return 1;   /* 0x0603 cleared the slide counter before the fetch */
     }
     n -= 36;
     if (n < 1) {                         /* 37  rest */
@@ -231,11 +286,11 @@ static int step_code(Mmd2 *m, int t)
     if (n < 8) { tr->octave = n; return 0; }              /* 40..47 */
     n -= 8;
     if (n < 2) {                                          /* 48, 49 */
-        tr->vol = (tr->vol + (n ? 1 : -1)) & 15;
+        set_volume(m, t, (tr->vol + (n ? 1 : -1)) & 15);
         return 0;
     }
     n -= 2;
-    if (n < 16) { tr->vol = n; return 0; }                /* 50..65 */
+    if (n < 16) { set_volume(m, t, n); return 0; }         /* 50..65 */
     n -= 16;
     if (n < 32) {                                         /* 66..97 */
         if (t < MMD2_FM) {
@@ -283,9 +338,29 @@ static int step_code(Mmd2 *m, int t)
         return 0;
     }
     n -= 1;
-    if (n < 16) return 0;                                 /* 115..130  vib */
+    if (n < 16) {                                         /* 115..130 */
+        /* 0x078f: three bytes out of .VOI+0x00. */
+        long o = VOI_VIB + (long)n * 3;
+        if (o + 2 < m->voiLen) {
+            tr->lvlCount = tr->lvlPeriod = m->voi[o];
+            tr->lvlLimit = m->voi[o + 1];
+            tr->lvlDelta = m->voi[o + 2];
+            tr->lvlSaved = tr->level;
+        }
+        return 0;
+    }
     n -= 16;
-    if (n < 16) return 0;                                 /* 131..146  slide */
+    if (n < 16) {                                         /* 131..146 */
+        /* 0x07b8: three bytes out of .VOI+0x30, the last two a signed word. */
+        long o = VOI_SLIDE + (long)n * 3;
+        if (o + 2 < m->voiLen) {
+            int d = m->voi[o + 1] | (m->voi[o + 2] << 8);
+            if (d & 0x8000) d -= 0x10000;
+            tr->sldCount = tr->sldPeriod = m->voi[o];
+            tr->sldDelta = d;
+        }
+        return 0;
+    }
     n -= 16;
     if (n < 4) {                                          /* 147..150 */
         tr->len += n < 2 ? -(int)(2 - n) : (int)(n - 1);
@@ -351,11 +426,52 @@ void mmd2_tick(Mmd2 *m)
         int guard = 0;
         if (!tr->active) continue;
         if (tr->count > 0) tr->count--;
+
+        /* 0x05a5: the level envelope.  The bound at 0x05b1 is an 8-bit add
+         * whose carry decides which way the limit is a stop - a positive delta
+         * climbs to it, a negative one falls to it. */
+        if (tr->lvlCount > 0 && --tr->lvlCount == 0) {
+            int sum = (tr->level + tr->lvlDelta) & 0xff;
+            int carried = tr->level + tr->lvlDelta > 0xff;
+            if (carried ? sum >= tr->lvlLimit : sum <= tr->lvlLimit) {
+                tr->level = sum;
+                apply_level(m, t);
+            }
+            tr->lvlCount = tr->lvlPeriod;
+        }
+
+        /* 0x05e6: the pitch slide, every `period` ticks and unbounded. */
+        if (tr->sldCount > 0 && --tr->sldCount == 0) {
+            tr->sldCount = tr->sldPeriod;
+            tr->pitch += tr->sldDelta;
+            write_pitch(m, t);
+        }
         /* 0x0584: the note is released when what is left of it reaches the
          * gate point.  A gate of nought only releases on the FM side - the
          * SSG holds until the next note. */
         if (tr->count == tr->gate && (tr->gate != 0 || t < MMD2_FM))
             key_off(m, t);
+        if (tr->count == 0 && tr->active) {
+            /* 0x0603..0x0617, run once before the codes are read:
+             *
+             *     [si+0x10] = 0                 stop any slide
+             *     al = [si+0x0c]                the level envelope's period
+             *     if (al != 0) {
+             *         [si+0x0b] = al            re-arm its counter
+             *         [si+8] = [si+0x0f]        and put the level back
+             *     }
+             *
+             * The slide has to be stopped HERE and not in the note handler.
+             * A track writes `slide` and then the note, so clearing it when
+             * the note arrives throws away the slide that was just asked for
+             * - which is what this port did, and the lead came out as flat
+             * notes with no glide at all. */
+            tr->sldCount = 0;
+            if (tr->lvlPeriod) {
+                tr->lvlCount = tr->lvlPeriod;
+                tr->level = tr->lvlSaved;
+            }
+        }
         while (tr->count == 0 && tr->active && guard++ < 256)
             if (step_code(m, t)) break;
     }

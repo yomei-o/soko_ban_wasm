@@ -316,6 +316,8 @@ void app_play(App *a, int stage)
     a->facing = app_facing(DIR_DOWN);
     a->lastSprite = gfx_man(a->facing, 0, 0);
     a->result = RESULT_PLAYING;
+    a->overStep = 0;
+    a->overTick = 0;
     a->screen = SCR_PLAY;
     gfx_palette(&a->gfx, CG_PAL_TILES);
     app_music(a, BGM_PLAY);
@@ -388,11 +390,15 @@ void app_key(App *a, int key)
             if (a->game.stage >= 1)
                 a->record[a->game.stage - 1] = a->game.moves;
             a->result = RESULT_CLEAR;
+            a->overStep = 0;
+            a->overTick = 0;
             app_music(a, BGM_CLEAR);
         } else if (a->game.st && a->game.moves >= a->game.st->moves) {
             /* 1edb:14bb: `cmp steps, limit` then `jae` into the BGM 3 path,
              * which is the "仕事が遅い。やりなおしだっ!!" overlay. */
             a->result = RESULT_FAIL;
+            a->overStep = 0;
+            a->overTick = 0;
             app_music(a, BGM_FAIL);
         }
         break;
@@ -514,6 +520,14 @@ void app_tick(App *a)
         }
         a->dirty = 1;
         return;
+    }
+    if (a->screen == SCR_PLAY && a->result != RESULT_PLAYING) {
+        if (a->overStep < OVER_PASSES &&
+            ++a->overTick >= OVER_FRAMES) {
+            a->overTick = 0;
+            a->overStep++;
+            a->dirty = 1;
+        }
     }
     if (a->animLeft > 0) {
         /* 1edb:2c9f: a counter runs 0, 1, then resets to -1 and steps the
@@ -689,17 +703,27 @@ static void draw_play(App *a)
      * at whichever of those corners the man is furthest from. */
     draw_score(a, mx < GFX_W / 2 ? 0x212 : 10, my < GFX_H / 2 ? 0x136 : 10);
 
-    /* The clear and failure overlays: the mask punches a cloud out of the
-     * board and the picture shows through it. */
+    /* The clear and failure pictures, dissolved in the way FUN_23b0_0440 does
+     * it - see the note in app.h.  Anything that is not colour 0 goes on. */
     if (a->result != RESULT_PLAYING) {
         const Cg *pic = a->result == RESULT_CLEAR ? &a->clear : &a->peke;
-        const Cg *msk = a->result == RESULT_CLEAR ? &a->clearMask
-                                                  : &a->pekeMask;
-        int px, py;
-        for (py = 0; py < GFX_H; py++)
-            for (px = 0; px < GFX_W; px++)
-                if (cg_pixel(msk, px, py))
-                    a->gfx.px[py][px] = (unsigned char)cg_pixel(pic, px, py);
+        int pass;
+
+        for (pass = 0; pass <= a->overStep && pass < OVER_PASSES; pass++) {
+            long o;
+            for (o = (long)pass * 2; o < CG_PLANE - 1; o += OVER_STRIDE) {
+                int row = (int)(o / (GFX_W / 8)), col = (int)(o % (GFX_W / 8));
+                int k;
+                if (row >= GFX_H) break;
+                /* One word: the byte at the offset and the one after it. */
+                for (k = 0; k < 16; k++) {
+                    int x = col * 8 + k, v;
+                    if (x >= GFX_W) break;
+                    v = cg_pixel(pic, x, row);
+                    if (v) a->gfx.px[row][x] = (unsigned char)v;
+                }
+            }
+        }
     }
 }
 
