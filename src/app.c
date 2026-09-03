@@ -153,6 +153,7 @@ int app_init(App *a, const char *dir)
 {
     long len;
     unsigned char *d;
+    int k;
 
     memset(a, 0, sizeof *a);
     if (load_cg(&a->title, dir, "TITLE.CG", 4)) return -1;
@@ -165,6 +166,25 @@ int app_init(App *a, const char *dir)
     if (!d) return -8;
     if (font_load(&a->font, d, len)) { free(d); return -9; }
     free(d);
+
+    d = slurp(dir, "SBPVOICE.VOI", &len);
+    if (!d) return -10;
+    a->voiLen = len < (long)sizeof a->voi ? len : (long)sizeof a->voi;
+    memcpy(a->voi, d, (size_t)a->voiLen);
+    free(d);
+    for (k = 0; k < BGM_COUNT; k++) {
+        char name[32];
+        snprintf(name, sizeof name, "SBPBGM%d.BGM", k);
+        d = slurp(dir, name, &len);
+        if (!d) return -11;
+        a->bgmLen[k] = len < (long)sizeof a->bgm[k] ? len
+                                                   : (long)sizeof a->bgm[k];
+        memcpy(a->bgm[k], d, (size_t)a->bgmLen[k]);
+        free(d);
+    }
+    mmd2_reset(&a->mmd);
+    a->song = -1;
+    a->music = 1;
 
     d = slurp(dir, "SBPMEN.DAT", &len);
     if (!d) return -5;
@@ -189,6 +209,7 @@ int app_init(App *a, const char *dir)
     a->bootPhase = BOOT_RISE_A;
     a->bootStep = 0;
     boot_palette(a, 0, 11, 0);
+    app_music(a, BGM_TITLE);
     return 0;
 }
 
@@ -204,6 +225,41 @@ int app_facing(int dir)
     case DIR_RIGHT: return 1;
     case DIR_DOWN: return 2;
     default: return 3;                   /* DIR_UP */
+    }
+}
+
+/* [0x128d] guards every FUN_24d7_001d call, so turning the music off just
+ * means never starting one. */
+void app_music(App *a, int n)
+{
+    if (!a->music || n < 0 || n >= BGM_COUNT) {
+        mmd2_stop(&a->mmd);
+        a->song = -1;
+        return;
+    }
+    if (n == a->song && a->mmd.playing) return;
+    mmd2_play(&a->mmd, a->bgm[n], a->bgmLen[n], a->voi, a->voiLen);
+    a->song = n;
+}
+
+void app_audio(App *a, short *out, int frames, int rate)
+{
+    int chunk = rate / MMD2_TICK_HZ;
+    int done = 0;
+
+    if (chunk < 1) chunk = 1;
+    while (done < frames) {
+        int n = frames - done < chunk ? frames - done : chunk;
+        mmd2_tick(&a->mmd);
+        mmd2_render(&a->mmd, out + done, n, rate);
+        done += n;
+    }
+    /* The songs stop when every track runs out; the original loops them with
+     * code 252, and the ones that do not are restarted here. */
+    if (!a->mmd.playing && a->song >= 0) {
+        int n = a->song;
+        a->song = -1;
+        app_music(a, n);
     }
 }
 
@@ -260,6 +316,7 @@ void app_play(App *a, int stage)
     a->lastSprite = gfx_man(a->facing, 0, 0);
     a->screen = SCR_PLAY;
     gfx_palette(&a->gfx, CG_PAL_TILES);
+    app_music(a, BGM_PLAY);
     a->dirty = 1;
 }
 
@@ -331,6 +388,7 @@ void app_key(App *a, int key)
     case KEY_ESC:
         a->screen = SCR_SELECT;
         gfx_palette(&a->gfx, CG_PAL_TITLE);
+        app_music(a, BGM_TITLE);
         break;
     default:
         return;

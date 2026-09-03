@@ -78,6 +78,28 @@ EMSCRIPTEN_KEEPALIVE unsigned char *soko_frame(void)
     return rgba;
 }
 
+/* Audio.  The page pulls this from a ScriptProcessorNode; there is no
+ * WebAudio worklet here on purpose - the node is deprecated but works
+ * everywhere, and the whole point of this port is to run on machines that do
+ * not have the new things. */
+#define AUDIO_MAX 8192
+static short audio[AUDIO_MAX];
+
+EMSCRIPTEN_KEEPALIVE short *soko_audio(int frames, int rate)
+{
+    if (frames > AUDIO_MAX) frames = AUDIO_MAX;
+    if (!ready) {
+        int k;
+        for (k = 0; k < frames; k++) audio[k] = 0;
+        return audio;
+    }
+    app_audio(&app, audio, frames, rate);
+    return audio;
+}
+
+EMSCRIPTEN_KEEPALIVE void soko_music(int n) { if (ready) app_music(&app, n); }
+EMSCRIPTEN_KEEPALIVE int soko_song(void) { return app.song; }
+
 EMSCRIPTEN_KEEPALIVE int soko_screen(void) { return app.screen; }
 EMSCRIPTEN_KEEPALIVE int soko_stage(void) { return app.game.stage; }
 EMSCRIPTEN_KEEPALIVE int soko_pick(void) { return app.pick; }

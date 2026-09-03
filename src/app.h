@@ -23,6 +23,7 @@
 #include "game.h"
 #include "gfx.h"
 #include "men.h"
+#include "mmd2.h"
 
 /* FUN_2329_000d's geometry, and FUN_1edb_042c's hit test on top of it:
  *
@@ -77,6 +78,22 @@
 
 enum { SCR_BOOT, SCR_TITLE, SCR_SELECT, SCR_PLAY };
 
+/* Which song goes where, from the four FUN_24d7_001d(n) call sites.  That
+ * function jumps through a table at 24d7:0034 whose case n pushes the DS
+ * offset of "sbpbgm<n>.bgm" and calls the loader, so n IS the file number.
+ *
+ *   FUN_1edb_000e   0   the title and the stage grid
+ *   FUN_1edb_109b   2   while the stage loads
+ *   FUN_1edb_109b   4   the stage itself
+ *   FUN_1edb_40bc   1   the ending, alongside END1.CG
+ *
+ * 3 and 5 are never reached from the code Ghidra could follow. */
+#define BGM_TITLE 0
+#define BGM_LOADING 2
+#define BGM_PLAY 4
+#define BGM_END 1
+#define BGM_COUNT 6
+
 enum {
     KEY_UP, KEY_RIGHT, KEY_DOWN, KEY_LEFT,
     KEY_UNDO, KEY_RETRY, KEY_ESC, KEY_ENTER,
@@ -98,6 +115,14 @@ typedef struct {
     int bootTick;
     unsigned char bootPal[16][3];         /* the loading screen's own palette */
     unsigned char logoPlane[LOGO_PLANE];  /* the one plane the logo lives in */
+
+    Mmd2 mmd;
+    unsigned char voi[1024];
+    long voiLen;
+    unsigned char bgm[BGM_COUNT][4096];
+    long bgmLen[BGM_COUNT];
+    int song;                             /* which one is playing, or -1 */
+    int music;                            /* [0x128d]: is BGM on at all */
     int bootPhase;                        /* 0..5, the sequence below */
     int bootStep;                         /* steps done inside a phase */
 
@@ -135,5 +160,11 @@ void app_settle(App *a);                  /* run the slide out */
 
 /* DIR_* to the original's facing, and back. */
 int app_facing(int dir);
+
+/* Start one of the six songs, or -1 for silence. */
+void app_music(App *a, int n);
+
+/* Fill `frames` of mono 16-bit, ticking the driver as the OPN timer would. */
+void app_audio(App *a, short *out, int frames, int rate);
 
 #endif

@@ -25,9 +25,11 @@ Thinking Rabbit の PC-98 版『倉庫番 Select 30』を、実物のフロッ�
 * [x] 盤面の描画と規則（歩く・押す・undo・勝ち判定）+ 検査 60 項目
 * [x] 画面遷移 — タイトル → 面選択（6×5 の格子は原作の当たり判定そのまま）→ 盤面
 * [x] WASM 化と Pages。`tests/wasm_check.js` が node で叩く
-* [ ] クリア／失敗の演出（`CLEAR.CG` `PEKE.CG`）と SCORE / TRACE の窓
-* [ ] 音。MMD2 ドライバと MML の文法は全部読めた（[docs/sound.md](docs/sound.md)）。
-      演奏器がまだ無い
+* [ ] クリア／失敗の演出（`CLEAR.CG` `PEKE.CG`）とエンディング（`END1.CG` と BGM 1）
+* [ ] TRACE（手順の記録・再生）と OPTION
+* [x] **音**。MMD2 ドライバと MML を読んで演奏器を書いた
+      （[docs/sound.md](docs/sound.md)）。YM2203 の FM3 + SSG3、6 曲。
+      ブラウザでは「音を出す」ボタンか最初の操作で鳴る
 * [ ] `FONT.CG` の字形（42 バイト固定長までは分かったが並びが未確定）
 
 詳細は [docs/format.md](docs/format.md) と [docs/sound.md](docs/sound.md)。
@@ -39,6 +41,8 @@ sh tools/build.sh wasm           soko.js / soko.wasm だけ
 ./tmp/soko_shot.exe screen 1 tmp/play.png --press rrdd
 ./tmp/soko_shot.exe pic disk/TITLE.CG tmp/title.png --pal 0
 node tests/wasm_check.js
+./tmp/sound_check.exe            音程・音量・6 曲を検定する
+./tmp/sound_check.exe wav 0 8    tmp/bgm0.wav に 8 秒書き出す
 ```
 
 操作は矢印キーか WASD、`Z` で戻す、`R` でやり直し、`Esc` で面選択。

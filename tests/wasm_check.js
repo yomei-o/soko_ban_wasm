@@ -142,6 +142,40 @@ SokoBan().then(M => {
   ok(M._soko_moves() <= M._soko_target(), 'inside the limit of ' + M._soko_target());
   ok(M._soko_done() === M._soko_boxes(), 'every box is home');
 
+  // Audio.  The page pulls int16 out of soko_audio; here it just has to be a
+  // real signal, and the song has to be the one the original picks for the
+  // screen: 0 on the title and the grid, 4 in a stage.
+  function audio(frames) {
+    const p = M._soko_audio(frames, 44100);
+    const a = M.HEAP16.subarray(p >> 1, (p >> 1) + frames);
+    let sum = 0;
+    for (let i = 0; i < frames; i++) sum += a[i] * a[i];
+    return Math.sqrt(sum / frames);
+  }
+
+  M._soko_play(1);
+  ok(M._soko_song() === 4, 'a stage plays SBPBGM4');
+  let r = audio(4096);
+  for (let i = 0; i < 20 && r < 50; i++) r = audio(4096);
+  ok(r > 50, 'the stage music makes a signal (rms ' + r.toFixed(0) + ')');
+
+  M._soko_key(KEY.ESC);
+  ok(M._soko_song() === 0, 'the grid plays SBPBGM0');
+  r = audio(4096);
+  for (let i = 0; i < 20 && r < 50; i++) r = audio(4096);
+  ok(r > 50, 'the grid music makes a signal (rms ' + r.toFixed(0) + ')');
+
+  // Turning it off keys everything off, but the FM release still has to ring
+  // out - the driver only writes register 0x28, it does not mute the chip -
+  // so what this checks is that it dies away.
+  M._soko_music(-1);
+  ok(M._soko_song() === -1, 'music off');
+  const first = audio(4096);
+  let last = first;
+  for (let i = 0; i < 12; i++) last = audio(4096);
+  ok(last < first * 0.2 || last < 5,
+     'and it dies away (' + first.toFixed(0) + ' -> ' + last.toFixed(0) + ')');
+
   if (fails) { console.log(fails + ' checks failed'); process.exit(1); }
   console.log('wasm checks passed');
 }).catch(e => { console.log('FAIL ' + e); process.exit(1); });

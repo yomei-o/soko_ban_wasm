@@ -10,7 +10,7 @@ set -e
 cd "$(dirname "$0")/.."
 
 CC="sh tools/cc.sh -O2 -Wall -Wextra -std=c99 -Isrc"
-CORE="src/cg.c src/men.c src/game.c src/gfx.c src/font.c src/app.c"
+CORE="src/cg.c src/men.c src/game.c src/gfx.c src/font.c src/app.c src/mmd2.c src/opn.c src/ssg.c"
 
 mkdir -p tmp
 
@@ -20,6 +20,8 @@ if [ "$what" = all ] || [ "$what" = native ] || [ "$what" = check ]; then
     echo "== native"
     $CC -o tmp/soko_shot.exe  src/main_shot.c src/png.c $CORE
     $CC -o tmp/game_check.exe tests/game_check.c src/men.c src/game.c
+    $CC -o tmp/sound_check.exe tests/sound_check.c src/mmd2.c src/opn.c \
+        src/ssg.c -lm
 fi
 
 if [ "$what" = all ] || [ "$what" = wasm ]; then
@@ -29,6 +31,7 @@ fi
 if [ "$what" = check ]; then
     echo "== checks"
     ./tmp/game_check.exe
+    ./tmp/sound_check.exe
     echo "== shots"
     ./tmp/soko_shot.exe board 1 tmp/s01.png
     ./tmp/soko_shot.exe board 24 tmp/s24.png

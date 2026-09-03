@@ -6,18 +6,18 @@ EMSDK=C:/prog/emsdk/emsdk
 PATH="/c/prog/emsdk/emsdk/node/22.16.0_64bit/bin:$PATH"
 export PATH
 
-CORE="src/cg.c src/men.c src/game.c src/gfx.c src/font.c src/app.c"
+CORE="src/cg.c src/men.c src/game.c src/gfx.c src/font.c src/app.c src/mmd2.c src/opn.c src/ssg.c"
 
 # Only the files the port actually reads are embedded, so the page stays small.
 EMB=""
-for f in TITLE.CG SELECT.CG CHR98N.CG WINDOWS.CGM LOGO.CG FONT.CG SBPMEN.DAT; do
+for f in TITLE.CG SELECT.CG CHR98N.CG WINDOWS.CGM LOGO.CG FONT.CG SBPMEN.DAT SBPVOICE.VOI SBPBGM0.BGM SBPBGM1.BGM SBPBGM2.BGM SBPBGM3.BGM SBPBGM4.BGM SBPBGM5.BGM; do
     EMB="$EMB --embed-file disk/$f@/disk/$f"
 done
 
 "$EMSDK/upstream/emscripten/emcc.exe" -O2 -std=c99 -Isrc -o soko.js \
     src/main_wasm.c $CORE $EMB \
     -s MODULARIZE=1 -s EXPORT_NAME=SokoBan \
-    -s EXPORTED_RUNTIME_METHODS=ccall,cwrap,HEAPU8,HEAPU32 \
+    -s EXPORTED_RUNTIME_METHODS=ccall,cwrap,HEAPU8,HEAPU32,HEAP16 \
     -s ALLOW_MEMORY_GROWTH=1 -s ENVIRONMENT=web,worker,node
 
 ls -la soko.js soko.wasm

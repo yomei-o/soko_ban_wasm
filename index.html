@@ -60,6 +60,7 @@
   <button data-key="4">戻す (Z)</button>
   <button data-key="5">やり直し (R)</button>
   <button data-key="6">面選択 (Esc)</button>
+  <button id="snd">音を出す</button>
 </div>
 <div id="hud"></div>
 <div id="err"></div>
@@ -86,6 +87,43 @@
   };
 
   function fail(m) { err.textContent = m; }
+
+  // Audio.  A ScriptProcessorNode rather than a worklet: it is deprecated but
+  // works in every browser this has to run on, and the wasm hands back plain
+  // int16 that only needs scaling.
+  var ac = null, node = null;
+  var sndBtn = document.getElementById('snd');
+
+  function startAudio() {
+    if (!M || ac) return;
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) { sndBtn.textContent = '音は使えません'; return; }
+    ac = new AC();
+    node = ac.createScriptProcessor(2048, 0, 1);
+    node.onaudioprocess = function (e) {
+      var out = e.outputBuffer.getChannelData(0);
+      var n = out.length;
+      var p = M._soko_audio(n, ac.sampleRate | 0);
+      var src = M.HEAP16.subarray(p >> 1, (p >> 1) + n);
+      for (var i = 0; i < n; i++) out[i] = src[i] / 32768;
+    };
+    node.connect(ac.destination);
+    ac.resume();
+    sndBtn.textContent = '音を止める';
+  }
+
+  function stopAudio() {
+    if (!ac) return;
+    node.disconnect();
+    ac.close();
+    ac = null;
+    node = null;
+    sndBtn.textContent = '音を出す';
+  }
+
+  sndBtn.addEventListener('click', function () {
+    if (ac) stopAudio(); else startAudio();
+  });
 
   SokoBan().then(function (mod) {
     M = mod;
@@ -132,6 +170,7 @@
 
   cv.addEventListener('mousedown', function (e) {
     if (!M) return;
+    startAudio();               // a browser only allows this from a gesture
     var p = at(e);
     M._soko_click(p.x, p.y);
     e.preventDefault();
@@ -147,13 +186,15 @@
     if (!M) return;
     var k = MAP[e.code];
     if (k === undefined) return;
+    startAudio();
     M._soko_key(k);
     e.preventDefault();
   });
 
-  Array.prototype.forEach.call(document.querySelectorAll('#bar button'),
+  Array.prototype.forEach.call(document.querySelectorAll('#bar button[data-key]'),
     function (b) {
       b.addEventListener('click', function () {
+        startAudio();
         if (M) M._soko_key(parseInt(b.dataset.key, 10));
         cv.focus();
       });
