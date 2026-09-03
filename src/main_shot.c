@@ -157,7 +157,11 @@ int main(int argc, char **argv)
         const char *which = argv[2];
         int rc = app_init(&app, "disk");
         if (rc) { fprintf(stderr, "app_init failed: %d\n", rc); return 1; }
-        if (!strcmp(which, "boot")) app.screen = SCR_BOOT;
+        if (!strcmp(which, "boot")) {
+            int n = arg_int(argc, argv, "--ticks", 0);
+            app.screen = SCR_BOOT;
+            while (n-- > 0) app_tick(&app);
+        }
         else if (!strcmp(which, "title")) app.screen = SCR_TITLE;
         else if (!strcmp(which, "select")) {
             app.screen = SCR_SELECT;

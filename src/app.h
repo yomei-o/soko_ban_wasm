@@ -46,9 +46,34 @@
 #define SEL_LOCKED 15000                 /* a record at or over this is shut */
 
 /* LOGO.CG is 8000 bytes = 80 x 100, and FUN_2406_01b7 drops it at
- * 0xb000:0x4c90 - offset 19600, which is 19600 / 80 = row 245. */
+ * 0xb000:0x4c90 - offset 19600, which is 19600 / 80 = row 245.  The strip
+ * holds BOTH logos side by side, but they are never on screen together: the
+ * right half is staged there and moved into the left half's slot for the
+ * second one.
+ *
+ * FUN_23b0_03a9 scrolls a band 0x1b bytes in from the left, 0xd words wide,
+ * from row 0x2d50 / 0x50 = 145, 0xc8 = 200 rows tall, 0x64 = 100 times.  So
+ * the Kao crescent rises from row 245 to row 145.
+ *
+ * FUN_23b0_03ef first does `rep movsw` of 0xfa0 words = 8000 bytes from
+ * 0x4cc6 to 0x4cab - byte 54 of row 245 to byte 27 of row 245, which drags
+ * "soft office THINKING RABBIT PRESENTS" from x = 432 into the same slot at
+ * x = 216 - and then scrolls the same band from row 0x30c0 / 0x50 = 156,
+ * 0xb4 = 180 rows, 0x5a = 90 times.
+ */
 #define LOGO_Y 245
 #define LOGO_ROWS 100
+#define LOGO_STRIDE 80
+#define LOGO_BAND_BYTE 0x1b             /* x = 216 */
+#define LOGO_BAND_WORDS 0xd             /* 26 bytes, 208 pixels */
+#define LOGO_A_ROW 145
+#define LOGO_A_ROWS 200
+#define LOGO_A_STEPS 100
+#define LOGO_B_FROM 54                  /* byte 54 of row 245, x = 432 */
+#define LOGO_B_ROW 156
+#define LOGO_B_ROWS 180
+#define LOGO_B_STEPS 90
+#define LOGO_PLANE (LOGO_STRIDE * GFX_H)
 
 enum { SCR_BOOT, SCR_TITLE, SCR_SELECT, SCR_PLAY };
 
@@ -72,6 +97,9 @@ typedef struct {
     int frame;
     int bootTick;
     unsigned char bootPal[16][3];         /* the loading screen's own palette */
+    unsigned char logoPlane[LOGO_PLANE];  /* the one plane the logo lives in */
+    int bootPhase;                        /* 0..5, the sequence below */
+    int bootStep;                         /* steps done inside a phase */
 
     int record[MEN_STAGES];              /* 0 = never cleared */
 

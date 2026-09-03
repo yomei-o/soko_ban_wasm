@@ -39,10 +39,53 @@
  * disk takes. */
 #define BOOT_GROUND 0
 #define BOOT_INK 13
-#define BOOT_GREEN_UNTIL 40
-#define BOOT_FADE_STEP 4                 /* ticks per fade step */
-#define BOOT_FADE_UNTIL (BOOT_GREEN_UNTIL + 16 * BOOT_FADE_STEP)
-#define BOOT_HOLD (BOOT_FADE_UNTIL + 70)
+#define BOOT_HOLD_TICKS 40               /* the original waits on the disk */
+#define BOOT_FADE_TICKS 4                /* per palette step */
+
+/* The order in FUN_1edb_000e, after the file check passes:
+ *
+ *     FUN_23b0_03a9()                          the Kao crescent rises
+ *     wait
+ *     for i in 0..15:                          colour 13 green -> white,
+ *         setrgbpalette(13, i, i/4+12, i)      so it dissolves into the
+ *         wait                                 white ground
+ *     FUN_23b0_03a9()                          and scrolls on out of sight
+ *     setrgbpalette(13, 0, 0, 0)               13 turns black
+ *     FUN_23b0_03ef()                          THINKING RABBIT rises, in black
+ *
+ * so the two logos are never up together: the first is green and fades away,
+ * the second is black.
+ */
+enum {
+    BOOT_RISE_A, BOOT_WAIT, BOOT_FADE, BOOT_RISE_A2, BOOT_RISE_B, BOOT_DONE
+};
+
+/* One pass of FUN_23b0_03a9 / FUN_23b0_03ef: the band moves up a row. */
+static void logo_scroll(App *a, int row, int rows)
+{
+    int r;
+    for (r = row; r < row + rows && r < GFX_H; r++) {
+        unsigned char *src = a->logoPlane + r * LOGO_STRIDE + LOGO_BAND_BYTE;
+        unsigned char *dst = src - LOGO_STRIDE;
+        int k;
+        if (r == 0) continue;
+        for (k = 0; k < LOGO_BAND_WORDS * 2; k++) dst[k] = src[k];
+    }
+}
+
+/* FUN_23b0_03ef's `rep movsw`: 8000 bytes back by 27, which slides the second
+ * logo out of its staging half and into the band. */
+static void logo_bring_second(App *a)
+{
+    long from = (long)LOGO_Y * LOGO_STRIDE + LOGO_B_FROM;
+    long to = (long)LOGO_Y * LOGO_STRIDE + LOGO_BAND_BYTE;
+    long n = LOGO_ROWS * LOGO_STRIDE;
+    long k;
+    for (k = 0; k < n; k++) {
+        if (from + k >= LOGO_PLANE || to + k >= LOGO_PLANE) break;
+        a->logoPlane[to + k] = a->logoPlane[from + k];
+    }
+}
 
 static void boot_palette(App *a, int r, int g, int b)
 {
@@ -133,6 +176,18 @@ int app_init(App *a, const char *dir)
     a->step = CC_STEP;
     a->pick = 0;
     a->dirty = 1;
+    /* LOGO.CG straight into the plane at row 245, the way FUN_2406_01b7
+     * leaves it. */
+    {
+        int y, xb;
+        memset(a->logoPlane, 0, sizeof a->logoPlane);
+        for (y = 0; y < LOGO_ROWS; y++)
+            for (xb = 0; xb < LOGO_STRIDE; xb++)
+                a->logoPlane[(LOGO_Y + y) * LOGO_STRIDE + xb] =
+                    a->logo.plane[0][y * LOGO_STRIDE + xb];
+    }
+    a->bootPhase = BOOT_RISE_A;
+    a->bootStep = 0;
     boot_palette(a, 0, 11, 0);
     return 0;
 }
@@ -326,17 +381,52 @@ void app_tick(App *a)
     a->frame++;
     if (a->screen == SCR_BOOT) {
         a->bootTick++;
-        if (a->bootTick < BOOT_GREEN_UNTIL) {
-            /* holding on green */
-        } else if (a->bootTick < BOOT_FADE_UNTIL) {
-            int i = (a->bootTick - BOOT_GREEN_UNTIL) / BOOT_FADE_STEP;
+        switch (a->bootPhase) {
+        case BOOT_RISE_A:
+            logo_scroll(a, LOGO_A_ROW, LOGO_A_ROWS);
+            if (++a->bootStep >= LOGO_A_STEPS) {
+                a->bootPhase = BOOT_WAIT;
+                a->bootStep = 0;
+            }
+            break;
+        case BOOT_WAIT:
+            if (++a->bootStep >= BOOT_HOLD_TICKS) {
+                a->bootPhase = BOOT_FADE;
+                a->bootStep = 0;
+            }
+            break;
+        case BOOT_FADE: {
+            int i = a->bootStep / BOOT_FADE_TICKS;
             if (i > 15) i = 15;
             boot_palette(a, i, i / 4 + 12, i);
-        } else if (a->bootTick == BOOT_FADE_UNTIL) {
-            boot_palette(a, 0, 0, 0);
-        } else if (a->bootTick >= BOOT_HOLD) {
-            a->screen = SCR_TITLE;
-            gfx_palette(&a->gfx, CG_PAL_TITLE);
+            if (++a->bootStep >= 16 * BOOT_FADE_TICKS) {
+                a->bootPhase = BOOT_RISE_A2;
+                a->bootStep = 0;
+            }
+            break;
+        }
+        case BOOT_RISE_A2:
+            logo_scroll(a, LOGO_A_ROW, LOGO_A_ROWS);
+            if (++a->bootStep >= LOGO_A_STEPS) {
+                boot_palette(a, 0, 0, 0);
+                logo_bring_second(a);
+                a->bootPhase = BOOT_RISE_B;
+                a->bootStep = 0;
+            }
+            break;
+        case BOOT_RISE_B:
+            logo_scroll(a, LOGO_B_ROW, LOGO_B_ROWS);
+            if (++a->bootStep >= LOGO_B_STEPS) {
+                a->bootPhase = BOOT_DONE;
+                a->bootStep = 0;
+            }
+            break;
+        default:
+            if (++a->bootStep >= BOOT_HOLD_TICKS) {
+                a->screen = SCR_TITLE;
+                gfx_palette(&a->gfx, CG_PAL_TITLE);
+            }
+            break;
         }
         a->dirty = 1;
         return;
@@ -414,11 +504,15 @@ static void draw_boot(App *a)
     int y, x;
 
     gfx_clear(&a->gfx, BOOT_GROUND);
-    /* LOGO.CG is one plane of 80 bytes by 100 rows, laid in at row 245. */
-    for (y = 0; y < LOGO_ROWS; y++)
-        for (x = 0; x < GFX_W; x++)
-            if (cg_pixel(&a->logo, x, y))
-                a->gfx.px[LOGO_Y + y][x] = BOOT_INK;
+    /* Whatever the scrolling has left in the plane.  Only the band the
+     * original scrolls is ever visible - x = 216 for 208 pixels - so the
+     * staging half at x = 432 is masked off. */
+    for (y = 0; y < GFX_H; y++)
+        for (x = LOGO_BAND_BYTE * 8; x < (LOGO_BAND_BYTE + LOGO_BAND_WORDS * 2) * 8;
+             x++) {
+            int b = a->logoPlane[y * LOGO_STRIDE + x / 8];
+            if ((b >> (7 - (x & 7))) & 1) a->gfx.px[y][x] = BOOT_INK;
+        }
 }
 
 /* FUN_2329_000d, cell for cell. */
