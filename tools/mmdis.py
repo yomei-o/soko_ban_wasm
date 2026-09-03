@@ -123,7 +123,14 @@ def main():
     print('%s: %d bytes, strategy 0x%02x, interrupt 0x%02x, name %r' %
           (os.path.basename(path), len(d), strategy, interrupt, name))
 
-    p = Dis(path, [strategy, interrupt])
+    # The interrupt routine dispatches through cs:[bx + 0x12] with bx twice
+    # the DOS command number, so the table at 0x12 holds thirteen more entry
+    # points - command 0 is init, which is where the driver hooks its vector.
+    table = [struct.unpack_from('<H', d, 0x12 + k * 2)[0] for k in range(13)]
+    entries = [strategy, interrupt] + [t for t in set(table) if t < len(d)]
+    extra = [int(x, 16) for x in sys.argv[3:] if x.startswith('0x')]
+    print('command table: %s' % ' '.join('%04x' % t for t in table))
+    p = Dis(path, entries + extra)
 
     if what == 'map':
         print('%d of %d bytes reachable (%.0f%%), %d routines' %

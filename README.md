@@ -26,10 +26,11 @@ Thinking Rabbit の PC-98 版『倉庫番 Select 30』を、実物のフロッ�
 * [x] 画面遷移 — タイトル → 面選択（6×5 の格子は原作の当たり判定そのまま）→ 盤面
 * [x] WASM 化と Pages。`tests/wasm_check.js` が node で叩く
 * [ ] クリア／失敗の演出（`CLEAR.CG` `PEKE.CG`）と SCORE / TRACE の窓
-* [ ] `.BGM` と `.VOI`
+* [ ] 音。MMD2 ドライバと MML の文法は全部読めた（[docs/sound.md](docs/sound.md)）。
+      演奏器がまだ無い
 * [ ] `FONT.CG` の字形（42 バイト固定長までは分かったが並びが未確定）
 
-詳細は [docs/format.md](docs/format.md)。
+詳細は [docs/format.md](docs/format.md) と [docs/sound.md](docs/sound.md)。
 
 ```
 sh tools/build.sh check          全部ビルドして検査して PNG を吐く
@@ -52,6 +53,8 @@ python tools/men.py   disk/SBPMEN.DAT       30 面を絵にする
 python tools/men.py   disk/SBPMEN.DAT --c   30 面を C の表にする
 python tools/strings.py tmp/SBP98.BIN       文字列（16bit コードの雑音を除く）
 python tools/cg.py disk/TITLE.CG t.png --pal 0
+python tools/solve.py disk/SBPMEN.DAT 1    面を解いて手順を出す
+python tools/mmdis.py disk/MMD2.SYS map 0x78 0x264   音源ドライバを読む
 ```
 
 面 11 は例えばこう出る:
