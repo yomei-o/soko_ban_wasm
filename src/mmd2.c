@@ -204,6 +204,7 @@ static int step_code(Mmd2 *m, int t)
     if (n < 36) {                        /* 1..36  a note */
         if (!(tr->flags & 0x40)) key_off(m, t);
         key_on(m, t, n);
+        tr->notes++;
         tr->count = tr->len;
         /* 0x080a: the key-off point is length * q / 8, computed as
          * (len << 8) >> 3 times q, keeping the high byte. */
@@ -259,17 +260,24 @@ static int step_code(Mmd2 *m, int t)
     n -= 16;
     if (n < 1) {                                          /* 114  loop end */
         /* 0x076a: count 0 always goes back; otherwise count down and pop the
-         * frame when it reaches zero. */
+         * frame when it reaches zero.
+         *
+         * THIS MUST NOT COST A TICK.  0x076a ends in a plain `ret`, so it
+         * comes back to 0x063b, whose `jmp 0x618` reads the next code in the
+         * same pass - only the note handler at 0x063d and the rest handler at
+         * 0x068e escape the fetch loop, and they do it by popping the return
+         * address.  Returning 1 here made a track lose one tick every time it
+         * came round, so tracks with short loops fell behind tracks with long
+         * ones and the channels drifted apart over a minute or so. */
         int top = tr->loopTop - 1;
         if (top < 0) return 0;
         if (tr->loopCount[top] == 0) {
             tr->p = tr->loopBack[top];
-            return 1;                    /* one jump a tick, so an empty loop
-                                          * cannot spin */
+            return 0;
         }
         if (--tr->loopCount[top] > 0) {
             tr->p = tr->loopBack[top];
-            return 1;
+            return 0;
         }
         tr->loopTop = top;
         return 0;
@@ -308,8 +316,9 @@ static int step_code(Mmd2 *m, int t)
         to -= 0x1384;
         if (to >= 0 && to < m->songLen) tr->p = to;
         else tr->active = 0;
-        return 1;                        /* one jump a tick, so a bad loop
-                                          * cannot spin for ever */
+        /* Like the loop end, a jump reads on in the same pass; the guard in
+         * mmd2_tick is what stops a bad one spinning. */
+        return 0;
     }
     n -= 1;
     if (tr->p >= m->songLen) { tr->active = 0; return 1; }

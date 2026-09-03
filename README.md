@@ -33,6 +33,7 @@ Thinking Rabbit の PC-98 版『倉庫番 Select 30』を、実物のフロッ�
 * [ ] `FONT.CG` の字形（42 バイト固定長までは分かったが並びが未確定）
 
 詳細は [docs/format.md](docs/format.md) と [docs/sound.md](docs/sound.md)。
+作業の引継ぎは [RESUME.md](RESUME.md)。
 
 ```
 sh tools/build.sh check          全部ビルドして検査して PNG を吐く

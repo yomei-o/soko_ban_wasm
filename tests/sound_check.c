@@ -103,7 +103,7 @@ int main(int argc, char **argv)
 {
     static Mmd2 m;
     static short buf[RATE * 12];
-    static unsigned char song[64];
+    static unsigned char song[96];
     unsigned char *voi;
     long voiLen;
     int k;
@@ -239,6 +239,61 @@ int main(int argc, char **argv)
         soft = rms(buf, RATE / 2);
         ok(loud > soft * 2, k ? "SSG volume 15 is louder than 0"
                               : "FM volume 15 is louder than 0");
+    }
+
+    /* NO DRIFT BETWEEN CHANNELS.  Every track opens with an endless loop, and
+     * the loop end must not cost a tick - MMD2.SYS 0x076a returns to 0x063b,
+     * whose `jmp 0x618` reads on in the same pass.  Getting that wrong makes a
+     * track lose one tick a lap, so a short loop falls behind a long one and
+     * the channels pull apart after a minute.
+     *
+     * Two hand-made tracks catch it: one whole note round a loop against two
+     * half notes round a loop.  However long they run, the second has to have
+     * played exactly twice as many notes as the first. */
+    {
+        long p = 0;
+        int k;
+        long ticks;
+        /* track 0: loop { l96 note } */
+        song[p++] = 98;                          /* loop, endless */
+        song[p++] = (unsigned char)(151 + 90);   /* the longest coded length */
+        song[p++] = 254; song[p++] = 96;         /* ... make it exactly 96 */
+        song[p++] = 66;                          /* voice 0 */
+        song[p++] = 1 + 12;
+        song[p++] = 114;                         /* loop end */
+        song[p++] = 0;
+        /* track 1: loop { l48 note } - ONE note a lap, so it goes round twice
+         * as often as track 0.  That is the point: if the loop end costs a
+         * tick, this track pays it twice as often and the two pull apart.  Two
+         * notes a lap would slow both by the same amount and hide it. */
+        song[p++] = 98;
+        song[p++] = 254; song[p++] = 48;
+        song[p++] = 66;
+        song[p++] = 1 + 12;
+        song[p++] = 114;
+        song[p++] = 0;
+        for (k = 2; k < MMD2_TRACKS; k++) song[p++] = 0;
+
+        mmd2_play(&m, song, p, voi, voiLen);
+        /* Measured at one minute and again at four.  A boundary can leave the
+         * counts one apart - the run simply stops between two of track 1's
+         * notes - but that error must not GROW, and with the tick-losing bug
+         * it grew by about one a lap. */
+        {
+            long off1, off4;
+            /* 54.17 musical ticks a second, four timer interrupts each. */
+            for (ticks = 0; ticks < 60L * 217; ticks++) mmd2_tick(&m);
+            off1 = m.tr[1].notes - m.tr[0].notes * 2;
+            printf("  a minute in:    track 0 %4ld notes, track 1 %4ld "
+                   "(off by %ld)\n", m.tr[0].notes, m.tr[1].notes, off1);
+            for (ticks = 0; ticks < 180L * 217; ticks++) mmd2_tick(&m);
+            off4 = m.tr[1].notes - m.tr[0].notes * 2;
+            printf("  four minutes:   track 0 %4ld notes, track 1 %4ld "
+                   "(off by %ld)\n", m.tr[0].notes, m.tr[1].notes, off4);
+            ok(m.tr[0].notes > 100, "the whole-note track kept playing");
+            ok(off1 >= -1 && off1 <= 1, "in phase after a minute");
+            ok(off4 >= -1 && off4 <= 1, "and still in phase after four");
+        }
     }
 
     /* The six real songs: six tracks each, and each one makes a noise. */

@@ -83,6 +83,7 @@ typedef struct {
     int loopCount[MMD2_LOOPS];
     long loopBack[MMD2_LOOPS];
     int loopTop;
+    long notes;                         /* note-ons, for the drift check */
 } Mmd2Track;
 
 typedef struct {
