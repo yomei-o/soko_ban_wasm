@@ -1,0 +1,20 @@
+# the archive and the raw disk image stay out; disk/ holds the extracted files
+orig/
+*.lzh
+*.fdi
+
+# scratch
+tmp/
+*.o
+*.obj
+*.exe
+!disk/SBP98.EXE
+*.wasm
+*.pyc
+__pycache__/
+ghidra_proj/
+
+# never: the NEC font ROM is not ours to ship
+FONT.ROM*
+font.rom
+*.ROM

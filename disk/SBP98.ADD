@@ -1,0 +1,3 @@
+device = \mmd2.sys 3072 2048
+device = \mouse.sys
+

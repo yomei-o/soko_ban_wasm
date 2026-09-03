@@ -1,0 +1,6 @@
+files   = 10
+buffers = 20
+device  = mmd2.sys 3072 2048
+device  = mouse.sys
+shell   = sbp98.exe
+
