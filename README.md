@@ -7,6 +7,8 @@ Thinking Rabbit の PC-98 版『倉庫番 Select 30』を、実物のフロッ�
 何をしている関数なのかを確かめてから、同じ振る舞いをする C を手で書く。
 描画はソフトウェアラスタライズのみ（**WebGL は使わない**）。
 
+**遊ぶ: https://yomei-o.github.io/soko_ban_wasm/**
+
 同じやり方の前作: [lord_monarch_wasm](https://github.com/yomei-o/lord_monarch_wasm)
 
 ## いまの状態
@@ -21,17 +23,25 @@ Thinking Rabbit の PC-98 版『倉庫番 Select 30』を、実物のフロッ�
 * [x] **パレット** — DS:02a0 / 02d0 / 0300
 * [x] **タイルの格子** — 40px と 32px、CHR98N.CG の y=148/188 と 84/116
 * [x] 盤面の描画と規則（歩く・押す・undo・勝ち判定）+ 検査 60 項目
-* [ ] 画面遷移（タイトル → SELECT → GAME、`WINDOWS.CGM` の 6 窓）
+* [x] 画面遷移 — タイトル → 面選択（6×5 の格子は原作の当たり判定そのまま）→ 盤面
+* [x] WASM 化と Pages。`tests/wasm_check.js` が node で叩く
+* [ ] クリア／失敗の演出（`CLEAR.CG` `PEKE.CG`）と SCORE / TRACE の窓
 * [ ] `.BGM` と `.VOI`
-* [ ] WASM 化と Pages
+* [ ] `FONT.CG` の字形（42 バイト固定長までは分かったが並びが未確定）
 
 詳細は [docs/format.md](docs/format.md)。
 
 ```
 sh tools/build.sh check          全部ビルドして検査して PNG を吐く
-./tmp/soko_shot.exe board 1 tmp/s1.png --press rrdd
+sh tools/build.sh wasm           soko.js / soko.wasm だけ
+./tmp/soko_shot.exe screen select tmp/sel.png --pick 11
+./tmp/soko_shot.exe screen 1 tmp/play.png --press rrdd
 ./tmp/soko_shot.exe pic disk/TITLE.CG tmp/title.png --pal 0
+node tests/wasm_check.js
 ```
+
+操作は矢印キーか WASD、`Z` で戻す、`R` でやり直し、`Esc` で面選択。
+盤面はクリックでも歩く。
 
 ## 道具
 

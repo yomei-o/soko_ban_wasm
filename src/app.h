@@ -54,6 +54,7 @@ typedef struct {
 
     int px;                              /* the board's tile size and origin, */
     int ox, oy;                          /* recomputed when a stage starts */
+    int boxKind;                         /* which of the fifteen packages */
 } App;
 
 /* Reads the game's own files with fopen, which is why the wasm build embeds

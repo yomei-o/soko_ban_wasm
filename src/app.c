@@ -114,9 +114,17 @@ void app_play(App *a, int stage)
     if (stage < 1 || stage > a->stageCount) return;
     s = &a->stages[stage - 1];
     game_start(&a->game, s, stage);
-    a->px = men_tile_px(s);
-    a->ox = (GFX_W - s->w * a->px) / 2;
-    a->oy = (GFX_H - s->h * a->px) / 2;
+    /* FUN_1edb_31c5 picks the size and shifts the board into the middle of
+     * that grid in whole cells, so the origin is a multiple of the tile.
+     * Centring in pixels instead is off by half a tile on the odd boards. */
+    a->px = s->tilePx;
+    a->ox = s->shiftX * a->px;
+    a->oy = s->shiftY * a->px;
+    /* FUN_1edb_2bb9 turns a box into 0x1d + [0x3ed7] % 15, and [0x3ed7] comes
+     * from the clock once per stage, so every box in a stage is the same
+     * product.  Keying it to the stage instead keeps a screenshot the same
+     * from run to run. */
+    a->boxKind = (stage - 1) % T_BOX_KINDS;
     a->screen = SCR_PLAY;
     gfx_palette(&a->gfx, CG_PAL_TILES);
     a->dirty = 1;
@@ -296,7 +304,7 @@ static void draw_play(App *a)
             gfx_tile(&a->gfx, &a->chr, a->px, T_FLOOR, dx, dy, -1);
             if (men_wall(s, x, y)) t = T_WALL;
             else if (game_box(&a->game, x, y))
-                t = men_goal(s, x, y) ? T_BOX_ON_GOAL : T_BOX;
+                t = men_goal(s, x, y) ? T_BOX_ON_GOAL : T_BOX + a->boxKind;
             else if (men_goal(s, x, y)) t = T_GOAL;
             if (t >= 0) gfx_tile(&a->gfx, &a->chr, a->px, t, dx, dy, -1);
         }

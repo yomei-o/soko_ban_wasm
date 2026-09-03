@@ -16,15 +16,31 @@
 static const int BAND32[2] = { 84, 116 };
 static const int BAND40[2] = { 148, 188 };
 
+/* Two more bands hold the fifteen Kao product packages that stand in for the
+ * boxes: content at rows 289..318 and 321..358, which is a 32-pixel band from
+ * y = 288 and a 40-pixel one from y = 320.  Fifteen of each, from x = 0:
+ * 15 * 32 = 480 and 15 * 40 = 600, and the measured extents are exactly 480
+ * and 600 wide. */
+#define BOX_BAND32 288
+#define BOX_BAND40 320
+
 void gfx_tile_at(int px, int t, int *sx, int *sy)
 {
-    const int *band = px >= 40 ? BAND40 : BAND32;
     int perRow = GFX_W / px;
-    int row = t / perRow;
 
-    if (row > 1) row = 1;
-    *sx = (t % perRow) * px;
-    *sy = band[row];
+    if (t >= T_BOX) {
+        int n = (t - T_BOX) % T_BOX_KINDS;
+        *sx = n * px;
+        *sy = px >= 40 ? BOX_BAND40 : BOX_BAND32;
+        return;
+    }
+    {
+        const int *band = px >= 40 ? BAND40 : BAND32;
+        int row = t / perRow;
+        if (row > 1) row = 1;
+        *sx = (t % perRow) * px;
+        *sy = band[row];
+    }
 }
 
 void gfx_clear(Gfx *g, int colour)

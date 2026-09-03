@@ -53,12 +53,12 @@ static int save(const char *path, const Gfx *g)
 static void draw_board(Gfx *g, const Cg *sheet, const Game *gm)
 {
     const Stage *s = gm->st;
-    int px = men_tile_px(s);
-    int ox = (GFX_W - s->w * px) / 2;
-    int oy = (GFX_H - s->h * px) / 2;
+    int px = s->tilePx;
+    int ox = s->shiftX * px;
+    int oy = s->shiftY * px;
     int x, y;
 
-    gfx_clear(g, 0);
+    gfx_clear(g, 3);
     for (y = 0; y < s->h; y++) {
         for (x = 0; x < s->w; x++) {
             int dx = ox + x * px, dy = oy + y * px;
@@ -69,13 +69,17 @@ static void draw_board(Gfx *g, const Cg *sheet, const Game *gm)
             gfx_tile(g, sheet, px, T_FLOOR, dx, dy, -1);
             if (men_wall(s, x, y)) t = T_WALL;
             else if (game_box(gm, x, y))
-                t = men_goal(s, x, y) ? T_BOX_ON_GOAL : T_BOX;
+                t = men_goal(s, x, y) ? T_BOX_ON_GOAL
+                                      : T_BOX + (gm->stage - 1) % T_BOX_KINDS;
             else if (men_goal(s, x, y)) t = T_GOAL;
             if (t >= 0) gfx_tile(g, sheet, px, t, dx, dy, -1);
         }
     }
-    gfx_tile(g, sheet, px, T_MAN + gm->facing, ox + gm->x * px,
-             oy + gm->y * px, 1);
+    {
+        int pushing = gm->histLen > 0 && (gm->hist[gm->histLen - 1] & 4);
+        gfx_tile(g, sheet, px, gfx_man(gm->facing, pushing, gm->moves),
+                 ox + gm->x * px, oy + gm->y * px, 1);
+    }
 }
 
 static int arg_int(int argc, char **argv, const char *flag, int def)

@@ -18,9 +18,9 @@ uint32 (80 bytes each) after a 10-byte header comes to exactly 250:
     +0x02  1  the man's starting row
     +0x03  2  the target move count, little endian (stage 1 = 71, 26 = 2001)
     +0x05  5  zero
-    +0x0a  80 boxes    20 rows of 32 bits
+    +0x0a  80 goals    20 rows of 32 bits
     +0x5a  80 walls
-    +0xaa  80 goals
+    +0xaa  80 boxes
 
 A row's bit 7 of its first byte is column 0 - the PC-98 VRAM order, the same
 way round as the tile bitmaps - so the rows read as bytes straight off the
@@ -31,6 +31,17 @@ the man off the floor.
 Record 0 is all zeros and records 1..30 are the stages, with a 48-byte tail on
 the end.  Checks that all thirty pass: box count equals goal count, no box or
 goal on a wall, and the man starts on floor.
+
+Which plane is which comes from FUN_1edb_338f, the original's loader:
+
+    code = 4 * plane0_bit + 2 * plane1_bit + 1 * plane2_bit
+    board[col + row * 0x20] = DS:0xba[code]
+
+with DS:0xba holding `00 02 01 09 03 04 09 09`.  FUN_1edb_2bb9 then redraws a
+board value of 2 as one of fifteen sprites 0x1d..0x2b - the Kao product
+packages - so code 1, which is plane2 alone, is a BOX, and code 4, plane0
+alone, draws the blue dot and is a GOAL.  The counts are equal and both
+readings give a legal puzzle, so only the sprite settles it.
 
 The sibling name in the executable's filename table is `usermen.dat`, so MEN is
 面 and this is the built-in stage set.  It is a plain file on the disk, not
@@ -44,7 +55,7 @@ REC = 250
 TAIL = 48
 ROWS = 20
 COLS = 32
-BOXES, WALLS, GOALS = 0, 1, 2
+GOALS, WALLS, BOXES = 0, 1, 2
 
 
 class Stage:
