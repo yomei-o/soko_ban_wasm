@@ -137,14 +137,23 @@ int main(int argc, char **argv)
         long bytes;
 
         if (secs > 12) secs = 12;
-        snprintf(path, sizeof path, "disk/SBPBGM%d.BGM", n);
+        /* A single digit picks one of the six; anything else is taken as
+         * a path, so a hand-made one-track song renders the same way. */
+        if (argv[2][0] >= '0' && argv[2][0] <= '9' && !argv[2][1])
+            snprintf(path, sizeof path, "disk/SBPBGM%d.BGM", n);
+        else {
+            snprintf(path, sizeof path, "%s", argv[2]);
+            n = -1;
+        }
         bgm = slurp(path, &bgmLen);
         if (!bgm) { printf("cannot read %s\n", path); return 1; }
         mmd2_play(&m, bgm, bgmLen, voi, voiLen);
         frames = (long)RATE * secs;
         run(&m, buf, frames);
         bytes = frames * 2;
-        snprintf(out, sizeof out, "tmp/bgm%d.wav", n);
+        if (n < 0) snprintf(out, sizeof out, "tmp/one.wav");
+        else snprintf(out, sizeof out, "tmp/bgm%d.wav", n);
+        if (argv[2][1]) snprintf(out, sizeof out, "tmp/one.wav");
         f = fopen(out, "wb");
         if (!f) { printf("cannot write %s\n", out); return 1; }
         memcpy(hdr, "RIFF----WAVEfmt ", 16);

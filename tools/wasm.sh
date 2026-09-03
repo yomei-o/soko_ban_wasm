@@ -10,7 +10,7 @@ CORE="src/cg.c src/men.c src/game.c src/gfx.c src/font.c src/app.c src/mmd2.c sr
 
 # Only the files the port actually reads are embedded, so the page stays small.
 EMB=""
-for f in TITLE.CG SELECT.CG CHR98N.CG WINDOWS.CGM LOGO.CG FONT.CG SBPMEN.DAT SBPVOICE.VOI SBPBGM0.BGM SBPBGM1.BGM SBPBGM2.BGM SBPBGM3.BGM SBPBGM4.BGM SBPBGM5.BGM; do
+for f in TITLE.CG SELECT.CG CHR98N.CG WINDOWS.CGM LOGO.CG FONT.CG CLEAR.CG CLEARM.CG PEKE.CG PEKEM.CG SBPMEN.DAT SBPVOICE.VOI SBPBGM0.BGM SBPBGM1.BGM SBPBGM2.BGM SBPBGM3.BGM SBPBGM4.BGM SBPBGM5.BGM; do
     EMB="$EMB --embed-file disk/$f@/disk/$f"
 done
 

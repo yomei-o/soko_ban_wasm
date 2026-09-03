@@ -102,21 +102,44 @@
 
 enum { SCR_BOOT, SCR_TITLE, SCR_SELECT, SCR_PLAY };
 
-/* Which song goes where, from the four FUN_24d7_001d(n) call sites.  That
- * function jumps through a table at 24d7:0034 whose case n pushes the DS
- * offset of "sbpbgm<n>.bgm" and calls the loader, so n IS the file number.
+/* Which song goes where.  FUN_24d7_001d jumps through a table at 24d7:0034
+ * whose case n pushes the DS offset of "sbpbgm<n>.bgm", so n is the file
+ * number; and scanning the whole image for `callf 14d7:001d` finds SIX call
+ * sites, two more than Ghidra reached:
  *
- *   FUN_1edb_000e   0   the title and the stage grid
- *   FUN_1edb_109b   2   while the stage loads
- *   FUN_1edb_109b   4   the stage itself
- *   FUN_1edb_40bc   1   the ending, alongside END1.CG
+ *   1edb:03a7   0   just before FUN_1edb_03c9, the stage grid
+ *   1edb:10ae   2   entering a stage
+ *   1edb:121b   4   see below
+ *   1edb:14e5   3   1edb:14bb has just done `cmp [0x152b], [0x11db]` - the
+ *                   steps against the limit - and taken the `jae` branch
+ *   1edb:15af   2   after the wait, jumping back to 0x10cd to try again
+ *   1edb:40c0   1   the ending, alongside END1.CG
  *
- * 3 and 5 are never reached from the code Ghidra could follow. */
-#define BGM_TITLE 0
-#define BGM_LOADING 2
-#define BGM_PLAY 4
+ * The one that matters is 0x121b.  It sits behind
+ *
+ *     call FUN_1edb_3182 ; or ax, ax ; je 0x1210 (which plays 4)
+ *
+ * and FUN_1edb_3182 counts the board cells equal to 2 - the boxes that are
+ * NOT on a goal.  So it is zero only when the stage is solved: **4 is the
+ * clear music, not the stage music.**  While you play, what keeps going is
+ * the 2 started on the way in.
+ *
+ * The first pass had 4 as the in-stage music, so a stage played its own
+ * fanfare the whole way through.
+ *
+ * 5 is never called from anywhere: every one of the six filenames is
+ * referenced exactly once, all inside that jump table.
+ */
+#define BGM_SELECT 0
+#define BGM_PLAY 2
+#define BGM_CLEAR 4
+#define BGM_FAIL 3
 #define BGM_END 1
 #define BGM_COUNT 6
+
+/* What a stage ended as.  FUN_1edb_3182 == 0 is a clear; the steps reaching
+ * the limit at 1edb:14bb is a failure. */
+enum { RESULT_PLAYING, RESULT_CLEAR, RESULT_FAIL };
 
 enum {
     KEY_UP, KEY_RIGHT, KEY_DOWN, KEY_LEFT,
@@ -127,6 +150,7 @@ enum {
 typedef struct {
     Gfx gfx;
     Cg title, select, chr, windows, logo;
+    Cg clear, clearMask, peke, pekeMask;
     Font font;
     Stage stages[MEN_STAGES];
     int stageCount;
@@ -156,6 +180,7 @@ typedef struct {
     int px;                              /* the board's tile size and origin */
     int ox, oy;
     int boxKind;                         /* which of the fifteen packages */
+    int result;                          /* RESULT_* */
 
     /* FUN_1edb_2c10's slide.  A move is committed to the model at once and
      * then drawn pulled back by what is left of it, which puts the same

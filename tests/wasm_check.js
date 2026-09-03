@@ -138,6 +138,8 @@ SokoBan().then(M => {
   const K = { u: KEY.UP, r: KEY.RIGHT, d: KEY.DOWN, l: KEY.LEFT };
   for (const c of RUN) press(K[c]);
   ok(M._soko_won() === 1, 'stage 1 is cleared by the solved run');
+  ok(M._soko_result() === 1, 'and the stage is marked cleared');
+  ok(M._soko_song() === 4, 'which switches to SBPBGM4');
   ok(M._soko_moves() === 43, '43 moves');
   ok(M._soko_moves() <= M._soko_target(), 'inside the limit of ' + M._soko_target());
   ok(M._soko_done() === M._soko_boxes(), 'every box is home');
@@ -153,14 +155,18 @@ SokoBan().then(M => {
     return Math.sqrt(sum / frames);
   }
 
+  // FUN_1edb_3182 counts the boxes that are not on a goal, and 1edb:120b only
+  // plays SBPBGM4 when that is zero - so 4 is the clear music and 2 is what
+  // plays while a stage is being played.
   M._soko_play(1);
-  ok(M._soko_song() === 4, 'a stage plays SBPBGM4');
+  ok(M._soko_song() === 2, 'a stage plays SBPBGM2');
   let r = audio(4096);
   for (let i = 0; i < 20 && r < 50; i++) r = audio(4096);
   ok(r > 50, 'the stage music makes a signal (rms ' + r.toFixed(0) + ')');
 
   M._soko_key(KEY.ESC);
   ok(M._soko_song() === 0, 'the grid plays SBPBGM0');
+  ok(M._soko_result() === 0, 'and nothing is finished');
   r = audio(4096);
   for (let i = 0; i < 20 && r < 50; i++) r = audio(4096);
   ok(r > 50, 'the grid music makes a signal (rms ' + r.toFixed(0) + ')');
@@ -168,6 +174,17 @@ SokoBan().then(M => {
   // Turning it off keys everything off, but the FM release still has to ring
   // out - the driver only writes register 0x28, it does not mute the chip -
   // so what this checks is that it dies away.
+  // Walking past the limit is the failure at 1edb:14bb, which plays SBPBGM3.
+  M._soko_play(1);
+  ok(M._soko_target() === 71, 'stage 1 allows 71 steps');
+  for (let i = 0; i < 71; i++) press(i & 1 ? KEY.RIGHT : KEY.LEFT);
+  ok(M._soko_moves() === 71, 'walked to the limit');
+  ok(M._soko_result() === 2, 'and the stage is marked failed');
+  ok(M._soko_song() === 3, 'which switches to SBPBGM3');
+  press(KEY.RETRY);
+  ok(M._soko_result() === 0 && M._soko_moves() === 0, 'retry starts over');
+  ok(M._soko_song() === 2, 'back to SBPBGM2');
+
   M._soko_music(-1);
   ok(M._soko_song() === -1, 'music off');
   const first = audio(4096);

@@ -161,6 +161,13 @@ int app_init(App *a, const char *dir)
     if (load_cg(&a->chr, dir, "CHR98N.CG", 4)) return -3;
     if (load_cg(&a->windows, dir, "WINDOWS.CGM", 1)) return -4;
     if (load_cg(&a->logo, dir, "LOGO.CG", 1)) return -7;
+    /* The two overlays and their masks.  CLEARM.CG is a cloud-shaped hole and
+     * CLEAR.CG the picture that shows through it; PEKE is the same pair for
+     * the failure. */
+    if (load_cg(&a->clear, dir, "CLEAR.CG", 4)) return -12;
+    if (load_cg(&a->clearMask, dir, "CLEARM.CG", 1)) return -13;
+    if (load_cg(&a->peke, dir, "PEKE.CG", 4)) return -14;
+    if (load_cg(&a->pekeMask, dir, "PEKEM.CG", 1)) return -15;
 
     d = slurp(dir, "FONT.CG", &len);
     if (!d) return -8;
@@ -209,7 +216,9 @@ int app_init(App *a, const char *dir)
     a->bootPhase = BOOT_RISE_A;
     a->bootStep = 0;
     boot_palette(a, 0, 11, 0);
-    app_music(a, BGM_TITLE);
+    /* The original's first FUN_24d7_001d is at 1edb:03a7, right before the
+     * stage grid, so the logo and the title are silent. */
+    a->song = -1;
     return 0;
 }
 
@@ -306,6 +315,7 @@ void app_play(App *a, int stage)
     a->phase = 0;
     a->facing = app_facing(DIR_DOWN);
     a->lastSprite = gfx_man(a->facing, 0, 0);
+    a->result = RESULT_PLAYING;
     a->screen = SCR_PLAY;
     gfx_palette(&a->gfx, CG_PAL_TILES);
     app_music(a, BGM_PLAY);
@@ -333,6 +343,7 @@ void app_key(App *a, int key)
     if (a->screen == SCR_TITLE) {
         a->screen = SCR_SELECT;
         gfx_palette(&a->gfx, CG_PAL_TITLE);
+        app_music(a, BGM_SELECT);
         a->dirty = 1;
         return;
     }
@@ -351,16 +362,39 @@ void app_key(App *a, int key)
 
     if (app_busy(a)) return;             /* the original walks, then listens */
 
+    /* Once a stage is over, anything but a retry goes back to the grid -
+     * 1edb:15af waits, restarts the stage music and jumps to 0x10cd. */
+    if (a->result != RESULT_PLAYING) {
+        if (key == KEY_RETRY) app_play(a, a->game.stage);
+        else {
+            a->screen = SCR_SELECT;
+            gfx_palette(&a->gfx, CG_PAL_TITLE);
+            app_music(a, BGM_SELECT);
+        }
+        a->dirty = 1;
+        return;
+    }
+
     switch (key) {
     case KEY_UP: case KEY_RIGHT: case KEY_DOWN: case KEY_LEFT: {
         int before = a->game.pushes;
         a->facing = app_facing(key);
         if (game_step(&a->game, key))
             start_slide(a, key, a->game.pushes != before);
-        /* Clearing the stage is what stores the record; FUN_2329_05b8 keeps
-         * the step count, and FUN_2329_000d then draws the cell red. */
-        if (game_won(&a->game) && a->game.stage >= 1)
-            a->record[a->game.stage - 1] = a->game.moves;
+        /* 1edb:1204's count of boxes off their goals reaching zero is the
+         * clear, and that is where BGM 4 comes in; FUN_2329_05b8 stores the
+         * step count, which is what turns the grid cell red. */
+        if (game_won(&a->game)) {
+            if (a->game.stage >= 1)
+                a->record[a->game.stage - 1] = a->game.moves;
+            a->result = RESULT_CLEAR;
+            app_music(a, BGM_CLEAR);
+        } else if (a->game.st && a->game.moves >= a->game.st->moves) {
+            /* 1edb:14bb: `cmp steps, limit` then `jae` into the BGM 3 path,
+             * which is the "仕事が遅い。やりなおしだっ!!" overlay. */
+            a->result = RESULT_FAIL;
+            app_music(a, BGM_FAIL);
+        }
         break;
     }
     case KEY_UNDO: {
@@ -380,7 +414,7 @@ void app_key(App *a, int key)
     case KEY_ESC:
         a->screen = SCR_SELECT;
         gfx_palette(&a->gfx, CG_PAL_TITLE);
-        app_music(a, BGM_TITLE);
+        app_music(a, BGM_SELECT);
         break;
     default:
         return;
@@ -654,6 +688,19 @@ static void draw_play(App *a)
      * between (10,10), (0x212,10), (0x212,0x136) and (10,0x136); this puts it
      * at whichever of those corners the man is furthest from. */
     draw_score(a, mx < GFX_W / 2 ? 0x212 : 10, my < GFX_H / 2 ? 0x136 : 10);
+
+    /* The clear and failure overlays: the mask punches a cloud out of the
+     * board and the picture shows through it. */
+    if (a->result != RESULT_PLAYING) {
+        const Cg *pic = a->result == RESULT_CLEAR ? &a->clear : &a->peke;
+        const Cg *msk = a->result == RESULT_CLEAR ? &a->clearMask
+                                                  : &a->pekeMask;
+        int px, py;
+        for (py = 0; py < GFX_H; py++)
+            for (px = 0; px < GFX_W; px++)
+                if (cg_pixel(msk, px, py))
+                    a->gfx.px[py][px] = (unsigned char)cg_pixel(pic, px, py);
+    }
 }
 
 void app_render(App *a)
