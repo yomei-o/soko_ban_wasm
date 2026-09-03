@@ -18,3 +18,4 @@ ghidra_proj/
 FONT.ROM*
 font.rom
 *.ROM
+out/
