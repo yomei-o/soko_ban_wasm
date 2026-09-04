@@ -88,6 +88,38 @@ const unsigned char cgPalette[3][16][3] = {
     }
 };
 
+/* WHICH PLANE IS WHICH BIT of the palette index.
+ *
+ * The planes are loaded in the file's own order - A800, B000, B800, E000, the
+ * segment table at DS:0x0330 - and the obvious reading is that plane p is bit
+ * p, which is what the PC-98's documented layout (A800 blue, B000 red, B800
+ * green, E000 intensity; code = I G R B) comes to.  It is wrong for this game,
+ * and the game says so itself.
+ *
+ * To draw in colour c the graphics library loads the GRCG's four tile
+ * registers - one per plane, in plane order - from a 16 x 4 table of 00 / ff
+ * at CS:0x1c2b, file offset 0xb18b:
+ *
+ *     colour  1   ff 00 00 00      bit 0 -> plane 0   A800
+ *     colour  2   00 00 ff 00      bit 1 -> plane 2   B800
+ *     colour  4   00 ff 00 00      bit 2 -> plane 1   B000
+ *     colour  8   00 00 00 ff      bit 3 -> plane 3   E000
+ *
+ * so bits 1 and 2 sit on the other plane from the documented layout, and the
+ * pictures have to be read the same way round as the game draws them.
+ *
+ * Three things go right the moment they are:
+ *
+ *   * FUN_1edb_109b fills the play screen with colour 3 of the tile palette,
+ *     #ffddbb, and the floor tile then decodes as 3 as well.  Read plane p as
+ *     bit p and the floor is 5, #ffbb33, an orange square on a cream page.
+ *   * The NIVEA tin, sprite 0x24, is one flat colour: 13, #0022aa, instead of
+ *     11, #88ff00.  It is a blue tin.
+ *   * A box standing on its goal is the 花王 crate, and its moon and 花王 come
+ *     out 10, #009966 - the green mark - instead of 12, #665511.
+ */
+const int CG_PLANE_BIT[CG_PLANES] = { 0, 2, 1, 3 };
+
 int cg_load(Cg *out, const unsigned char *data, long len, int planes)
 {
     long i = 0;
@@ -144,6 +176,6 @@ int cg_pixel(const Cg *cg, int x, int y)
     o = (long)y * (CG_W / 8) + x / 8;
     bit = 7 - (x & 7);
     for (p = 0; p < cg->planes; p++)
-        v |= ((cg->plane[p][o] >> bit) & 1) << p;
+        v |= ((cg->plane[p][o] >> bit) & 1) << CG_PLANE_BIT[p];
     return v;
 }

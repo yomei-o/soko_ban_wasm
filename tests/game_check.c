@@ -8,7 +8,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "cg.h"
 #include "game.h"
+#include "gfx.h"
 #include "men.h"
 
 static int fails;
@@ -167,6 +169,47 @@ int main(void)
     }
 
     free(d);
+
+    /* THE COLOURS OF THE TILE SHEET.
+     *
+     * cg.c reads plane p as bit CG_PLANE_BIT[p] of the palette index, which is
+     * 0, 2, 1, 3 and not the identity, because the game's own colour-to-GRCG
+     * table says so.  Read it as the identity and every one of these fails:
+     * the floor stops matching the page it is drawn on, the NIVEA tin turns
+     * yellow-green, and the 花王 mark on a crate that has reached its goal
+     * turns olive.  That last one is what a player notices. */
+    {
+        static Cg sheet;
+        int x, y, hit[16], i;
+
+        ok(CG_PLANE_BIT[0] == 0 && CG_PLANE_BIT[1] == 2 &&
+           CG_PLANE_BIT[2] == 1 && CG_PLANE_BIT[3] == 3,
+           "the planes carry bits 0, 2, 1, 3");
+
+        d = slurp("disk/CHR98N.CG", &len);
+        if (!d) { printf("FAIL cannot read disk/CHR98N.CG\n"); return 1; }
+        cg_load(&sheet, d, len, 4);
+        free(d);
+
+        for (i = 0; i < 16; i++) hit[i] = 0;
+        for (y = 0; y < 40; y++)
+            for (x = 0; x < 40; x++) hit[cg_pixel(&sheet, x, 148 + y)]++;
+        ok(hit[3] == 40 * 40, "the floor tile is colour 3, the play ground");
+
+        for (i = 0; i < 16; i++) hit[i] = 0;
+        for (y = 0; y < 40; y++)
+            for (x = 0; x < 40; x++)
+                hit[cg_pixel(&sheet, T_BOX_ON_GOAL * 40 + x, 148 + y)]++;
+        ok(hit[10] > 200 && hit[12] == 0,
+           "the 花王 mark on a box that is home is green, not olive");
+        ok(hit[14] > 800, "and it stands on yellow");
+
+        for (i = 0; i < 16; i++) hit[i] = 0;
+        for (y = 0; y < 40; y++)
+            for (x = 0; x < 40; x++) hit[cg_pixel(&sheet, 7 * 40 + x, 320 + y)]++;
+        ok(hit[13] > 1000 && hit[11] == 0, "the NIVEA tin is blue");
+    }
+
     if (fails) printf("%d checks failed\n", fails);
     else printf("all checks passed (%d stages)\n", n);
     return fails ? 1 : 0;

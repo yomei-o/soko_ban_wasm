@@ -19,7 +19,8 @@ what=${1:-all}
 if [ "$what" = all ] || [ "$what" = native ] || [ "$what" = check ]; then
     echo "== native"
     $CC -o tmp/soko_shot.exe  src/main_shot.c src/png.c $CORE
-    $CC -o tmp/game_check.exe tests/game_check.c src/men.c src/game.c
+    $CC -o tmp/game_check.exe tests/game_check.c src/men.c src/game.c \
+        src/cg.c
     $CC -o tmp/sound_check.exe tests/sound_check.c src/mmd2.c src/opn.c \
         src/ssg.c -lm
 fi

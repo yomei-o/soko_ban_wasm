@@ -78,6 +78,9 @@ while [ $# -gt 0 ]; do
     -I*)          echo "-I\"$(w "${1#-I}")\"" >> "$rsp" ;;
     -D*)          echo "-D${1#-D}" >> "$rsp" ;;
     -o)           out="$2"; shift ;;
+    # -lm is the maths library on unix and part of the CRT on MSVC: asking
+    # for m.lib gets "cannot open input file 'm.lib'".
+    -lm)          ;;
     -l*)          libs="$libs ${1#-l}.lib" ;;
     -*)           echo "$1" >> "$rsp" ;;
     *)            srcs="$srcs $1"; echo "\"$(w "$1")\"" >> "$rsp" ;;

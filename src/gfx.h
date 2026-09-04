@@ -41,7 +41,8 @@ void gfx_tile_at(int px, int t, int *sx, int *sy);
  *     box on goal  sheet 4      the plain 花王 crate
  *     a box        sheet 0x1d + n % 15, one of the fifteen Kao packages
  *
- * Sheet 2, the crate with a green cross, is not used on the play screen. */
+ * Sheet 2, the plain wooden crate with a cross, is not used on the play
+ * screen. */
 enum {
     T_FLOOR = 0,
     T_WALL = 1,

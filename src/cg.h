@@ -19,6 +19,11 @@ typedef struct {
  * it lies.  Returns 0 on success. */
 int cg_load(Cg *out, const unsigned char *data, long len, int planes);
 
+/* Which bit of the palette index each plane carries: 0, 2, 1, 3, and not the
+ * identity the plane order suggests.  The game's own colour-to-GRCG table says
+ * so; cg.c has it. */
+extern const int CG_PLANE_BIT[CG_PLANES];
+
 /* The colour index of one pixel. */
 int cg_pixel(const Cg *cg, int x, int y);
 

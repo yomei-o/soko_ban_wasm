@@ -162,9 +162,13 @@ int main(int argc, char **argv)
             app.screen = SCR_BOOT;
             while (n-- > 0) app_tick(&app);
         }
-        else if (!strcmp(which, "title")) app.screen = SCR_TITLE;
+        else if (!strcmp(which, "title")) {
+            app.screen = SCR_TITLE;
+            gfx_palette(&app.gfx, CG_PAL_TITLE);   /* app_key's, skipped here */
+        }
         else if (!strcmp(which, "select")) {
             app.screen = SCR_SELECT;
+            gfx_palette(&app.gfx, CG_PAL_TITLE);
             app.pick = arg_int(argc, argv, "--pick", 0);
         } else {
             int n = atoi(which);
