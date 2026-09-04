@@ -429,30 +429,40 @@ static int step_code(Mmd2 *m, int t)
         return 0;
     }
     n -= 8;
-    if (n < 1) {                                          /* 252  jump */
-        long to;
+    if (n < 1) {
+        /* 252: a REGISTER, not a jump.  0x0821 reads two arguments, puts the
+         * first in ch and the second in al and falls into 0x042a, which is the
+         * driver's one chip write - so the song is poking the YM2203 itself.
+         *
+         * Reading it as a jump into the song came from the loop codes being
+         * missed at first, and it is only harmless because none of the six
+         * songs uses it: the only code above 251 any of them carries is 254.
+         * A wrong jump would have sent a track off into the middle of a note. */
+        int r, v;
         if (tr->p + 1 >= m->songLen) { tr->active = 0; return 1; }
-        to = (long)(m->song[tr->p] | (m->song[tr->p + 1] << 8));
-        tr->p += 2;
-        /* The operand is an address inside the driver's own song buffer at
-         * 0x1384, so it becomes an offset from the start of the file. */
-        to -= 0x1384;
-        if (to >= 0 && to < m->songLen) tr->p = to;
-        else tr->active = 0;
-        /* Like the loop end, a jump reads on in the same pass; the guard in
-         * mmd2_tick is what stops a bad one spinning. */
+        r = m->song[tr->p++];
+        v = m->song[tr->p++];
+        reg(m, r, v);
         return 0;
     }
     n -= 1;
     if (tr->p >= m->songLen) { tr->active = 0; return 1; }
     {
         int arg = m->song[tr->p++];
-        if (n < 1) {                                      /* 253  voice */
+        if (n < 1) {
+            /* 253: the modulation preset.  0x082c copies four bytes out of
+             * .VOI+0x60 - the section at [0x0db8] - into +0x15, +0x16, +0x18
+             * and +0x19, and +0x15's low two bits pick one of the four soft
+             * LFOs at 0x0d0c (0x0b7a, 0x0b84, 0x0bae, 0x0bcf).
+             *
+             * None of the six songs carries a 253, so what is kept here is the
+             * argument and nothing else.  Writing the LFOs would be writing
+             * code that cannot be checked against anything. */
             tr->mode = arg;
         } else if (n < 2) {                               /* 254  length */
             tr->len = arg;
-        } else {                                          /* 255  detune */
-            tr->level = arg;
+        } else {                                          /* 255  the level */
+            tr->level = arg;                              /* 0x085a: [si+8] */
         }
     }
     return 0;
