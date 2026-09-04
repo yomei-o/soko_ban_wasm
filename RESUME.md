@@ -396,9 +396,16 @@ P=$(python -c "print('lr'*35+'l')")
 5. **OPTION と EDIT。** `WINDOWS.CGM` に窓がある（EDIT は STAGE / EDIT PLAY /
    SAVE LOAD / ORIGINAL LOAD / CLEAR BGM / EXIT、TOOL は 壁 / 点 / ラビ君 /
    荷物 と EXIT）。`usermen.dat` がユーザ面のファイル
-6. **記録の保存。** いまは実行のあいだだけ。`SBPUSER.DAT` と `TRACE.DAT` に
-   相当するものを localStorage に置く（lord_monarch の `index.html` が
-   base64 でやっているのが参考になる）
+6. ~~**記録の保存**~~ 済み（2026-09-04）。`SBPUSER.DAT` の 310 バイト
+   （10 バイト × 31、記録は各レコードの先頭ワード。`FUN_2329_07c6` が
+   `fread(&DS:0x3ee4, 10, 0x1f)` で読み、`FUN_1edb_3d80` が 2 バイト書いて
+   読み直す）を base64 で localStorage に。`app_user_save` /
+   `app_user_load`、頁側は `soko_user_*`。
+   **1 つだけ落とした**: 記録のある面をもう一度クリアしたとき、原作は
+   「前回:%05d 今回:%05d steps でした、今回の手順を保存しますか？」を出して
+   マウスの左右で決める（左=保存）。この文はテキスト画面に本体のフォント
+   ROM で出るもので、ROM は同梱できないから描けない。移植は常に保存する。
+   `TRACE.DAT` のほうは下の 4 番と一緒
 7. モノクロモード。`SBP98.DOC` に「起動時に SHIFT を押しっぱなしで
    モノクロ」と書いてあり、`[0x90]` がその旗で 4 プレーンと 3 プレーンを
    切り替える

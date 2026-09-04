@@ -46,7 +46,11 @@ TRACE / OPTION、それに記録の保存。**
       COPYRIGHT を 3 種類の散らし（重ねる・置き換える・黒へ消す）で
       入れ替える無限ループ。BGM 1
 * [ ] TRACE（手順の記録・再生）と OPTION / EDIT
-* [ ] 記録の保存（`SBPUSER.DAT` 相当を localStorage に）
+* [x] **記録の保存** — `SBPUSER.DAT` の 310 バイト（10 バイト × 31、記録は
+      各レコードの先頭ワード）をそのまま localStorage に置く。原作が
+      「前回:%05d 今回:%05d steps でした、今回の手順を保存しますか？」と
+      訊く所だけは出せない（PC-98 のテキスト画面＋本体のフォント ROM が要る）
+      ので、常に「はい」の側で動く
 * [ ] `FONT.CG` の字形（42 バイト固定長までは分かったが並びが未確定）
 
 詳細は [docs/format.md](docs/format.md) と [docs/sound.md](docs/sound.md)。

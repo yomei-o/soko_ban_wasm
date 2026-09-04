@@ -14,6 +14,7 @@ const KEY = { UP: 0, RIGHT: 1, DOWN: 2, LEFT: 3, UNDO: 4, RETRY: 5, ESC: 6,
 const SCR = { BOOT: 0, TITLE: 1, SELECT: 2, PLAY: 3 };
 
 let fails = 0;
+let RUN, K;                       // stage 1's solution, shared by the checks
 function ok(cond, what) {
   if (!cond) { console.log('FAIL ' + what); fails++; }
 }
@@ -145,8 +146,8 @@ SokoBan().then(M => {
   // inside the stage's own limit of 71.
   M._soko_play(1);
   settle();
-  const RUN = 'uuldllldlurrrrrddllulluldrrrdrrullllrrrulll';
-  const K = { u: KEY.UP, r: KEY.RIGHT, d: KEY.DOWN, l: KEY.LEFT };
+  RUN = 'uuldllldlurrrrrddllulluldrrrdrrullllrrrulll';
+  K = { u: KEY.UP, r: KEY.RIGHT, d: KEY.DOWN, l: KEY.LEFT };
   for (const c of RUN) press(K[c]);
   ok(M._soko_won() === 1, 'stage 1 is cleared by the solved run');
   ok(M._soko_result() === 1, 'and the stage is marked cleared');
@@ -225,6 +226,35 @@ SokoBan().then(M => {
   press(KEY.RETRY);
   ok(M._soko_result() === 0 && M._soko_moves() === 0, 'retry starts over');
   ok(M._soko_song() === 2, 'back to SBPBGM2');
+
+  // THE RECORDS.  SBPUSER.DAT is 31 records of 10 bytes with the record in the
+  // first word of each, and the page keeps those 310 bytes in localStorage.
+  {
+    ok(M._soko_user_size() === 310, 'SBPUSER.DAT is 310 bytes');
+    const before = M._soko_user_stamp();
+    M._soko_play(2);
+    settle();
+    press(KEY.RETRY);                       // nothing cleared, nothing saved
+    ok(M._soko_user_stamp() === before, 'a stage that is not cleared saves nothing');
+
+    M._soko_play(1);
+    settle();
+    for (const c of RUN) press(K[c]);
+    ok(M._soko_won() === 1, 'stage 1 cleared again');
+    ok(M._soko_user_stamp() !== before, 'and the records changed');
+
+    M._soko_user_pull();
+    const p = M._soko_user_buf();
+    const b = M.HEAPU8.subarray(p, p + 310);
+    ok((b[10] | (b[11] << 8)) === 43, 'stage 1 is 43 steps in the file image');
+    ok(b[0] === 0 && b[1] === 0, 'record 0 is unused');
+
+    b[10] = 99; b[11] = 0;                  // what a reload would hand back
+    M._soko_user_push();
+    M._soko_user_pull();
+    const c2 = M.HEAPU8.subarray(p, p + 310);
+    ok((c2[10] | (c2[11] << 8)) === 99, 'and a saved file comes back');
+  }
 
   M._soko_music(-1);
   ok(M._soko_song() === -1, 'music off');

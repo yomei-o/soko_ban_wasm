@@ -244,6 +244,32 @@ enum {
     END_STEPS
 };
 
+/* SBPUSER.DAT - the records.
+ *
+ * FUN_2329_07c6 reads it with fread(&DS:0x3ee4, 10, 0x1f), so it is 31 records
+ * of 10 bytes: one per stage with 0 unused, exactly the 310 bytes on the disk.
+ * The record itself is the FIRST WORD of a record - FUN_2329_0861 reads
+ * `*(word *)(stage * 10 + 0x3ee4)` and FUN_2329_05b8 writes it, both indexed
+ * by the stage number - and what the other eight bytes are for has not been
+ * found; the shipped file is all zeros.  This port keeps them zero.
+ *
+ * FUN_1edb_3d80 writes the two bytes back to the file and then re-reads the
+ * whole thing, which is how the table in memory catches up.
+ *
+ * WHEN it writes is the part this port cannot follow.  A stage cleared for the
+ * first time (its record still 0) is saved with no fuss, but clearing one that
+ * already has a record puts up
+ *
+ *     前回:%05d 今回:%05d steps でした、今回の手順を保存しますか？
+ *
+ * and waits for a mouse button - left saves, right does not.  That message
+ * goes out through the PC-98's TEXT plane with the machine's own font ROM,
+ * which is not ours to ship, so the port cannot draw it.  It behaves as though
+ * the answer were always yes. */
+#define USER_RECS 31
+#define USER_REC_BYTES 10
+#define USER_BYTES (USER_RECS * USER_REC_BYTES)
+
 /* What a stage ended as.  FUN_1edb_3182 == 0 is a clear; the steps reaching
  * the limit at 1edb:14bb is a failure. */
 enum { RESULT_PLAYING, RESULT_CLEAR, RESULT_FAIL };
@@ -298,6 +324,8 @@ typedef struct {
     int bootStep;                         /* steps done inside a phase */
 
     int record[MEN_STAGES];              /* 0 = never cleared */
+    int recordStamp;                     /* bumped whenever one changes, so a
+                                          * host can tell it has to save */
 
     int px;                              /* the board's tile size and origin */
     int ox, oy;
@@ -342,6 +370,12 @@ int app_facing(int dir);
 
 /* Start one of the six songs, or -1 for silence. */
 void app_music(App *a, int n);
+
+/* SBPUSER.DAT's 310 bytes, built from the records and read back into them.
+ * The host decides where to keep them: the page puts them in localStorage,
+ * the native builds do not keep them at all. */
+void app_user_save(const App *a, unsigned char *out);
+void app_user_load(App *a, const unsigned char *in, long len);
 
 /* Fill `frames` of mono 16-bit, ticking the driver as the OPN timer would. */
 void app_audio(App *a, short *out, int frames, int rate);

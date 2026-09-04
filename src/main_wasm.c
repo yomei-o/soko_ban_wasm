@@ -121,3 +121,18 @@ EMSCRIPTEN_KEEPALIVE void soko_play(int stage)
 }
 
 int main(void) { return 0; }
+
+/* THE RECORDS.  The page keeps SBPUSER.DAT's 310 bytes in localStorage: it
+ * reads soko_user_buf() after soko_user_pull(), and writes into that same
+ * buffer and calls soko_user_push() to put them back.  soko_user_stamp()
+ * changes whenever a record does, which is the page's cue to save. */
+static unsigned char userBuf[USER_BYTES];
+
+EMSCRIPTEN_KEEPALIVE unsigned char *soko_user_buf(void) { return userBuf; }
+EMSCRIPTEN_KEEPALIVE int soko_user_size(void) { return USER_BYTES; }
+EMSCRIPTEN_KEEPALIVE void soko_user_pull(void) { app_user_save(&app, userBuf); }
+EMSCRIPTEN_KEEPALIVE void soko_user_push(void)
+{
+    if (ready) app_user_load(&app, userBuf, USER_BYTES);
+}
+EMSCRIPTEN_KEEPALIVE int soko_user_stamp(void) { return app.recordStamp; }

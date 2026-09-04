@@ -197,6 +197,14 @@ int app_init(App *a, const char *dir)
     a->music = 1;
     a->songNext = -1;
 
+    /* FUN_2329_07c6: the records come off the disk at startup.  The shipped
+     * file is all zeros, so a fresh copy of the game has none. */
+    d = slurp(dir, "SBPUSER.DAT", &len);
+    if (d) {
+        app_user_load(a, d, len);
+        free(d);
+    }
+
     d = slurp(dir, "SBPMEN.DAT", &len);
     if (!d) return -5;
     a->stageCount = men_load(a->stages, d, len);
@@ -382,6 +390,34 @@ static void go_select(App *a)
         return;
     }
     select_now(a);
+}
+
+/* --- the records ---------------------------------------------------------
+ *
+ * app.h has the layout and the one thing this port does differently. */
+
+void app_user_save(const App *a, unsigned char *out)
+{
+    int n;
+
+    memset(out, 0, USER_BYTES);
+    for (n = 0; n < MEN_STAGES && n + 1 < USER_RECS; n++) {
+        int rec = a->record[n];
+        out[(n + 1) * USER_REC_BYTES] = (unsigned char)(rec & 0xff);
+        out[(n + 1) * USER_REC_BYTES + 1] = (unsigned char)((rec >> 8) & 0xff);
+    }
+}
+
+void app_user_load(App *a, const unsigned char *in, long len)
+{
+    int n;
+
+    if (!in || len < USER_BYTES) return;
+    for (n = 0; n < MEN_STAGES && n + 1 < USER_RECS; n++) {
+        long o = (long)(n + 1) * USER_REC_BYTES;
+        a->record[n] = in[o] | (in[o + 1] << 8);
+    }
+    a->dirty = 1;
 }
 
 /* --- the ending, FUN_1edb_40bc -------------------------------------------
@@ -638,8 +674,13 @@ void app_key(App *a, int key)
          * clear, and that is where BGM 4 comes in; FUN_2329_05b8 stores the
          * step count, which is what turns the grid cell red. */
         if (game_won(&a->game)) {
-            if (a->game.stage >= 1)
+            if (a->game.stage >= 1) {
+                /* 1edb:12e3: the original saves a first clear on its own and
+                 * asks about any later one.  See app.h - the port answers yes
+                 * because it cannot draw the question. */
                 a->record[a->game.stage - 1] = a->game.moves;
+                a->recordStamp++;
+            }
             a->result = RESULT_CLEAR;
             a->overStep = 0;
             a->overTick = 0;

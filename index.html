@@ -125,16 +125,48 @@
     if (ac) stopAudio(); else startAudio();
   });
 
+  // THE RECORDS.  The disk's SBPUSER.DAT is 31 records of 10 bytes and the
+  // game reads it at startup and writes it back after a clear; there is no
+  // disk here, so the same 310 bytes live in localStorage.  soko_user_stamp
+  // changes whenever a record does, which is when they are written out.
+  var KEY = 'soko_ban_wasm/sbpuser.dat', stamp = 0;
+
+  function userBytes() {
+    var p = M._soko_user_buf(), n = M._soko_user_size();
+    return M.HEAPU8.subarray(p, p + n);
+  }
+
+  function loadRecords() {
+    var raw;
+    try { raw = localStorage.getItem(KEY); } catch (e) { return; }
+    if (!raw) return;
+    var bin = atob(raw), b = userBytes();
+    if (bin.length !== b.length) return;
+    for (var i = 0; i < b.length; i++) b[i] = bin.charCodeAt(i);
+    M._soko_user_push();
+    stamp = M._soko_user_stamp();
+  }
+
+  function saveRecords() {
+    M._soko_user_pull();
+    var b = userBytes(), s = '';
+    for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+    try { localStorage.setItem(KEY, btoa(s)); } catch (e) { /* full or off */ }
+  }
+
   SokoBan().then(function (mod) {
     M = mod;
     var rc = M._soko_init();
     if (rc !== 0) { fail('データを読めませんでした (app_init ' + rc + ')'); return; }
+    loadRecords();
     img = cx.createImageData(W, H);
     requestAnimationFrame(frame);
   }).catch(function (e) { fail('読み込みに失敗しました: ' + e); });
 
   function frame() {
     M._soko_tick();
+    var st = M._soko_user_stamp();
+    if (st !== stamp) { stamp = st; saveRecords(); }
     var p = M._soko_frame();
     img.data.set(M.HEAPU8.subarray(p, p + W * H * 4));
     cx.putImageData(img, 0, 0);
