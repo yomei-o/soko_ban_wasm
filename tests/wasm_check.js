@@ -11,7 +11,7 @@ const SokoBan = require(path.join(process.cwd(), 'soko.js'));
 const W = 640, H = 400;
 const KEY = { UP: 0, RIGHT: 1, DOWN: 2, LEFT: 3, UNDO: 4, RETRY: 5, ESC: 6,
               ENTER: 7 };
-const SCR = { BOOT: 0, TITLE: 1, SELECT: 2, PLAY: 3 };
+const SCR = { BOOT: 0, TITLE: 1, SELECT: 2, PLAY: 3, END: 4 };
 
 let fails = 0;
 let RUN, K;                       // stage 1's solution, shared by the checks
@@ -61,6 +61,7 @@ SokoBan().then(M => {
   ok(h.get(0xffdd99) > 150000, 'the title sits on its cream ground');
   M._soko_key(KEY.ENTER);
   ok(M._soko_screen() === SCR.SELECT, 'and another leaves the title');
+  settle();                     // 1edb:042c scatters the grid on; let it land
   px = pixels();
   h = histogram(px);
   // FUN_2329_000d fills the panel white and every cell is white until it is

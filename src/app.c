@@ -137,6 +137,24 @@ static unsigned char *slurp(const char *dir, const char *name, long *len)
     return b;
 }
 
+/* --- screen changes ------------------------------------------------------
+ *
+ * app.h has the why.  The screen being left is kept and let go of a pass at a
+ * time, which comes to the same thing as scattering the new one on. */
+
+static void scatter_begin(App *a)
+{
+    memcpy(a->keep, a->gfx.px, sizeof a->keep);
+    a->scatterPass = 0;
+    a->scatterFrame = 0;
+}
+
+/* Which pass a byte of the screen belongs to. */
+static int scatter_of(long offset)
+{
+    return (int)(((offset & ~1L) % OVER_STRIDE) / 2);
+}
+
 static int load_cg(Cg *out, const char *dir, const char *name, int planes)
 {
     long len;
@@ -196,6 +214,7 @@ int app_init(App *a, const char *dir)
     a->song = -1;
     a->music = 1;
     a->songNext = -1;
+    a->scatterPass = -1;
 
     /* FUN_2329_07c6: the records come off the disk at startup.  The shipped
      * file is all zeros, so a fresh copy of the game has none. */
@@ -322,7 +341,9 @@ int app_busy(const App *a)
 void app_settle(App *a)
 {
     int guard = 0;
-    while ((a->animLeft > 0 || music_waiting(a)) && guard++ < 8192) app_tick(a);
+    while ((a->animLeft > 0 || music_waiting(a) || a->scatterPass >= 0) &&
+           guard++ < 8192)
+        app_tick(a);
 }
 
 /* The board, once the music is settled. */
@@ -330,6 +351,8 @@ static void play_now(App *a, int stage)
 {
     const Stage *s;
 
+    scatter_begin(a);                    /* 1edb:1108 draws into the hidden
+                                          * page; 23b0:0019 brings it over */
     s = &a->stages[stage - 1];
     game_start(&a->game, s, stage);
     /* FUN_1edb_31c5 picks the size from the board's extent and shifts the
@@ -377,6 +400,7 @@ void app_play(App *a, int stage)
 /* And the same for the way back to the grid. */
 static void select_now(App *a)
 {
+    scatter_begin(a);                    /* 1edb:042c does the same */
     a->screen = SCR_SELECT;
     gfx_palette(&a->gfx, CG_PAL_TITLE);
     a->dirty = 1;
@@ -859,6 +883,14 @@ void app_tick(App *a)
         return;
     }
 
+    if (a->scatterPass >= 0) {
+        if (++a->scatterFrame >= OVER_FRAMES) {
+            a->scatterFrame = 0;
+            if (++a->scatterPass >= OVER_PASSES) a->scatterPass = -1;
+        }
+        a->dirty = 1;
+    }
+
     /* 1edb:11d2: the picture only starts to dissolve in once BGM 4 is up. */
     if (a->screen == SCR_PLAY && a->result != RESULT_PLAYING) {
         if (a->overStep < OVER_PASSES &&
@@ -1070,6 +1102,13 @@ void app_render(App *a)
     default:
         draw_play(a);
         break;
+    }
+    if (a->scatterPass >= 0) {
+        int y, x;
+        for (y = 0; y < GFX_H; y++)
+            for (x = 0; x < GFX_W; x++)
+                if (scatter_of((long)y * (GFX_W / 8) + x / 8) > a->scatterPass)
+                    a->gfx.px[y][x] = a->keep[y][x];
     }
     a->dirty = 0;
 }

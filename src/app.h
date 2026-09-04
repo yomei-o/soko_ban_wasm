@@ -244,6 +244,22 @@ enum {
     END_STEPS
 };
 
+/* SCREEN CHANGES SCATTER TOO.
+ *
+ * The grid and the board are both drawn into the hidden page and then put on
+ * the screen with FUN_23b0_0019 - the same twenty-one pass, 42-byte scatter as
+ * everything else, replacing what was there:
+ *
+ *     1edb:042c   2406:000c (the title palette)  23b0:0019   the grid
+ *     1edb:109b   2406:008d (the tile palette)   23b0:0019   the board
+ *
+ * So a stage does not appear at once: the grid stays up, wearing the tile
+ * palette, while the board scatters in over it.  The port keeps the screen it
+ * is leaving in `keep` and lets the new one through pass by pass.
+ *
+ * A byte of the screen belongs to the pass `((offset & ~1) % 42) / 2`, which
+ * is all the bookkeeping the reveal needs. */
+
 /* SBPUSER.DAT - the records.
  *
  * FUN_2329_07c6 reads it with fread(&DS:0x3ee4, 10, 0x1f), so it is 31 records
@@ -330,6 +346,10 @@ typedef struct {
     int px;                              /* the board's tile size and origin */
     int ox, oy;
     int boxKind;                         /* which of the fifteen packages */
+    unsigned char keep[GFX_H][GFX_W];    /* the screen a change is leaving */
+    int scatterPass;                     /* 0..OVER_PASSES, or -1 for none */
+    int scatterFrame;
+
     int endStep;                         /* END_* */
     int endPass;                         /* 0..OVER_PASSES, the scatter */
     int endSub;                          /* 0..3 inside an erase pass */
