@@ -13,8 +13,9 @@ Thinking Rabbit の PC-98 版『倉庫番 Select 30』を、実物のフロッ�
 
 ## いまの状態
 
-**30 面ぜんぶ遊べる。絵も音も原作どおり。残りはエンディングと
-TRACE / OPTION、それに記録の保存。**
+**30 面ぜんぶ遊べて、絵も音もエンディングも原作どおり。**
+残っているのは、原作の流れに無いもの（TRACE / OPTION / EDIT）と、
+入れない判断をしたもの（モノクロモード）だけ。
 
 * [x] ディスクを開いた — FAT12、41 ファイル（`tools/fat12.py`）
 * [x] 実行形式 — MZ、ラージモデルの Borland C、DS = 0x19ca。
@@ -47,13 +48,17 @@ TRACE / OPTION、それに記録の保存。**
       二度と戻らない。`END1` → スタッフロール → `END2` → SPECIAL THANKS →
       COPYRIGHT を 3 種類の散らし（重ねる・置き換える・黒へ消す）で
       入れ替える無限ループ。BGM 1
-* [ ] TRACE（手順の記録・再生）と OPTION / EDIT
+* [-] TRACE と OPTION / EDIT は**製品の流れに無い**。`trace.dat` を開くのは
+      記録の保存の 1 か所だけで読む所が無く、OPTION / EDIT の窓は
+      `WINDOWS.CGM` にある未使用の絵（main と面選択の輪にどこからも出て
+      こない）。詳しくは RESUME
 * [x] **記録の保存** — `SBPUSER.DAT` の 310 バイト（10 バイト × 31、記録は
       各レコードの先頭ワード）をそのまま localStorage に置く。原作が
       「前回:%05d 今回:%05d steps でした、今回の手順を保存しますか？」と
       訊く所だけは出せない（PC-98 のテキスト画面＋本体のフォント ROM が要る）
       ので、常に「はい」の側で動く
-* [ ] `FONT.CG` の字形（42 バイト固定長までは分かったが並びが未確定）
+* [-] モノクロ（8 色）モードは入れていない（描画の道が 2 本になる）。
+      `FONT.CG` の字形も使う数字と英字だけ
 
 詳細は [docs/format.md](docs/format.md) と [docs/sound.md](docs/sound.md)。
 作業の引継ぎは [RESUME.md](RESUME.md)。
