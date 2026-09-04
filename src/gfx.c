@@ -3,23 +3,35 @@
 
 /* CHR98N.CG's own grid.
  *
- * Scanning the decoded sheet for rows that are neither background nor black
- * gives four bands for the characters and two for the boxes:
+ * Four bands for the characters and two for the boxes:
  *
- *     rows  84..115   32 tall     the narrow set, first row,  448 wide
- *     rows 116..147   32 tall     the narrow set, second row, 480 wide
- *     rows 148..187   40 tall     the wide set, first row,    560 wide
- *     rows 188..227   40 tall     the wide set, second row,   600 wide
- *     rows 289..318   32 tall     the boxes, narrow, 480 wide
- *     rows 321..358   40 tall     the boxes, wide,   600 wide
+ *     rows  84..115   32 tall     the narrow set, first row
+ *     rows 116..147   32 tall     the narrow set, second row
+ *     rows 148..187   40 tall     the wide set, first row
+ *     rows 188..227   40 tall     the wide set, second row
+ *     rows 289..318   32 tall     the boxes, narrow
+ *     rows 321..358   40 tall     the boxes, wide
  *
- * so the FIRST row holds fourteen sprites and the second fifteen, and the box
- * band fifteen.  14 + 15 + 15 = 44, which is exactly the size of the image
- * table FUN_1edb_2bb9 indexes: `DAT_29ca_1287 * 0xb0 + 0x4024 + n * 4`, with
- * 0xb0 = 176 bytes = 44 far pointers a size.
+ * Each size has 29 sprites and 15 boxes, which is exactly the size of the
+ * image table FUN_1edb_2bb9 indexes: `DAT_29ca_1287 * 0xb0 + 0x4024 + n * 4`,
+ * with 0xb0 = 176 bytes = 44 far pointers a size, and 29 + 15 = 44.
  *
- * Reading the first row as sixteen wide - the obvious guess from 640 / 40 -
- * puts everything from sprite 14 on in the wrong place.
+ * BUT THE TWO SIZES BREAK THEIR ROWS IN DIFFERENT PLACES.  The wide set is
+ * 14 then 15; the narrow set is **17 then 12**.  An unused slot is a solid
+ * square of the floor colour, so the slots can be counted by looking for the
+ * tiles with no colour 0 in them at all - every sprite has black in its
+ * outline.  Non-zero pixels a tile, with the bar where the sprites stop:
+ *
+ *     narrow row 1   1024 1024 1024 1024 900 811 ... 843 | 1024 1024 1024
+ *     narrow row 2   826 869 ... 869 | 1024 x8
+ *     wide row 1     1600 1600 1600 1600 1444 ... 1378 | 1600 1600
+ *     wide row 2     1378 ... 1404 | 1600
+ *
+ * Reading the narrow set as 14 + 15 puts sprite 14 - the first frame of the
+ * man pushing UPWARDS - on sprite 17, so on the seven boards drawn small an
+ * upward push showed a man walking sideways instead.  The rows were measured
+ * by scanning for "not background and not black", and the three white-armed
+ * pushing frames slip through that.
  */
 #define BAND1_32 84
 #define BAND2_32 116
@@ -27,22 +39,24 @@
 #define BAND2_40 188
 #define BOXES_32 288
 #define BOXES_40 320
-#define ROW1_COUNT 14
-#define ROW2_COUNT 15
+#define ROW1_32 17
+#define ROW1_40 14
+#define SPRITES 29
 
 void gfx_tile_at(int px, int t, int *sx, int *sy)
 {
     int wide = px >= 40;
+    int row1 = wide ? ROW1_40 : ROW1_32;
 
     if (t >= T_BOX) {
         *sx = ((t - T_BOX) % T_BOX_KINDS) * px;
         *sy = wide ? BOXES_40 : BOXES_32;
-    } else if (t < ROW1_COUNT) {
+    } else if (t < row1) {
         *sx = t * px;
         *sy = wide ? BAND1_40 : BAND1_32;
     } else {
-        int n = t - ROW1_COUNT;
-        if (n >= ROW2_COUNT) n = ROW2_COUNT - 1;
+        int n = t - row1;
+        if (n >= SPRITES - row1) n = SPRITES - row1 - 1;
         *sx = n * px;
         *sy = wide ? BAND2_40 : BAND2_32;
     }

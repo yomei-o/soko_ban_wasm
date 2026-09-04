@@ -31,6 +31,15 @@ static void okn(int cond, const char *what, int n)
     }
 }
 
+/* The same, for a sprite index rather than a stage. */
+static void oki(int cond, const char *what, int n)
+{
+    if (!cond) {
+        printf("FAIL %s (sprite %d)\n", what, n);
+        fails++;
+    }
+}
+
 static unsigned char *slurp(const char *path, long *len)
 {
     FILE *f = fopen(path, "rb");
@@ -208,6 +217,38 @@ int main(void)
         for (y = 0; y < 40; y++)
             for (x = 0; x < 40; x++) hit[cg_pixel(&sheet, 7 * 40 + x, 320 + y)]++;
         ok(hit[13] > 1000 && hit[11] == 0, "the NIVEA tin is blue");
+
+        /* WHERE THE SPRITE ROWS BREAK, which is not the same for the two
+         * sizes: the wide set is 14 then 15, the narrow set 17 then 12.
+         *
+         * An unused slot in a band is a solid square of the floor colour and
+         * every sprite has black in its outline, so a slot with no colour 0
+         * in it is one the grid should never have reached.  Reading the narrow
+         * set as 14 + 15 sends sprite 14 - the man pushing upwards - into the
+         * second row, where the first three slots are sideways walking, and
+         * the man vanished on the seven boards drawn small. */
+        {
+            int size, t, sx, sy;
+            for (size = 0; size < 2; size++) {
+                int wpx = size ? 40 : 32;
+                for (t = 5; t < 29; t++) {
+                    long black = 0;
+                    gfx_tile_at(wpx, t, &sx, &sy);
+                    for (y = 0; y < wpx; y++)
+                        for (x = 0; x < wpx; x++)
+                            if (!cg_pixel(&sheet, sx + x, sy + y)) black++;
+                    oki(black > 0, "the slot holds a sprite", t);
+                }
+            }
+            gfx_tile_at(32, 16, &sx, &sy);
+            ok(sx == 16 * 32 && sy == 84, "narrow sprite 16 is the last of row 1");
+            gfx_tile_at(32, 17, &sx, &sy);
+            ok(sx == 0 && sy == 116, "narrow sprite 17 opens row 2");
+            gfx_tile_at(40, 13, &sx, &sy);
+            ok(sx == 13 * 40 && sy == 148, "wide sprite 13 is the last of row 1");
+            gfx_tile_at(40, 14, &sx, &sy);
+            ok(sx == 0 && sy == 188, "wide sprite 14 opens row 2");
+        }
     }
 
     if (fails) printf("%d checks failed\n", fails);
