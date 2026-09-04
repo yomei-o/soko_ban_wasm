@@ -283,18 +283,54 @@ P=$(python -c "print('lr'*35+'l')")
      （クリア済みの色）なら数え、そうでなければ +0x0c 右も見る。
      返り値は `30 − 数`。**つまり全 30 面クリアで 0** ——移植は records から
      同じことを言えばよい（画素を読む必要は無い）
-   * `FUN_1edb_40bc` は **bgm(1) のあと無限ループ**（末尾が 1edb:40cb への
-     jmp）。中身は `end1` → `staff1` → `end2` → `staff3` → `staff4` の順で、
-     待ちは 5000 / 8192 / … / 7000 / 4096（`18a3:000e` が待ちのルーチン）
-   * 使う道具は 4 つ。`23b0:000d(n)` = `out 0xa6, n` で**表示ページの切替**、
-     `23b0:0180` = ページ 0 → 1 の複写、`23b0:01f5` と `23b0:00f9` =
-     ページを混ぜる／消す、`23b0:0440` = いつものディゾルブ（8 色版は
-     `23b0:04bc`）。絵の読み込みは `2406:094f`（4 プレーン）と
-     `2406:0ad2`（3 プレーン）、staff は `2406:0213` / `2406:042f`
-   * **未読は 1edb:41ce〜1edb:421f**（staff3 のあたり）と、
-     `23b0:00f9` / `01f5` が画面上でどう見えるか。ここを読んでから書くこと。
-     移植には**裏ページ**の概念がまだ無い（`Gfx` は 1 枚）ので、
-     どう持たせるかも決める必要がある
+   * `FUN_1edb_40bc` は **bgm(1) のあと無限ループ**。全文を写すとこう
+     （`out/sbp98.asm` の 1edb:40bc〜1edb:427b。`page(n)` = `23b0:000d` =
+     `out 0xa6,n` で**表示ページの切替**、`wait(n)` = `18a3:000e`）:
+
+     ```
+     bgm(1)
+     FUN_1edb_3796()                      クリアの絵の道でも呼ぶ何か
+     loop:
+       page(1); 絵 "end1" を読む          16 色なら 2406:094f、8 色なら 2406:0ad2
+       page(0); 23b0:00f9(); 2406:010e()
+       page(1); 23b0:0180()               ページ 0 → 1 の複写
+       page(0); 23b0:01f5()
+       wait(5000)
+       page(1); 0000:1a83(); 絵 "staff1" を読む     2406:0213
+       page(0); ディゾルブ                23b0:0440（8 色は 04bc）
+       wait(8192)
+       23b0:01f5()
+       page(1); 絵 "end2" を読む; 23b0:0180()
+       page(0); 23b0:01f5()
+       page(1); 0000:1a83(); 絵 "staff3" を読む     2406:042f
+       page(0); ディゾルブ
+       page(1); 0000:1a83(); 絵 "staff4" を読む     2406:042f
+       wait(4000)
+       page(0); 23b0:01f5(); ディゾルブ
+       wait(7000); 23b0:0019(); wait(4096)
+       goto loop
+     ```
+
+   * **効果は 3 つとも「21 段の散らし」の仲間**だった。外側はどれも
+     `ax = 0,2,…,40`（`cmp ax,0x2a`）で 42 バイト刻み、クリアの絵の
+     ディゾルブ（`23b0:0440`）とまったく同じ散らし方:
+
+     | | すること |
+     |---|---|
+     | `23b0:0440` | 裏ページを**色 0 を透明にして**重ねる（いま移植にあるやつ） |
+     | `23b0:01f5` | 裏ページを**黒ごと置き換える**（`ffff` のマスクで語単位に上書き） |
+     | `23b0:00f9` | 画面を**黒へ消す**（`~ror(0xf0,cl)` を AND、内側で cl を 4 ずつ 4 回） |
+     | `23b0:0180` | 散らしなしの単純複写、ページ 0 → 1 |
+
+     つまりエンディングは「裏ページに絵を置いて、3 種類の散らしで
+     入れ替えていく」だけ。移植には 21 段の仕掛けがもうあるので、
+     裏ページの持ち方さえ決めれば書ける
+   * まだ読んでいないのは `2406:010e`・`0000:1a83`（絵の読み込みの前後で
+     呼ばれる小物）と `23b0:0019`（B000 を回転マスクで舐める、最後の待ちの前）
+   * 移植には**裏ページ**の概念がまだ無い（`Gfx` は 1 枚）ので、
+     どう持たせるかも決める必要がある。クリアの絵のディゾルブは
+     「絵は Cg のまま、画面に散らして写す」で済ませたので、同じ手で
+     いけるかもしれない
    * スタッフロールの中身は PRODUCED by Hiroyuki Imabayashi / Kao
      Corporation、MUSIC by Kenzo Kumei / MICRO CABIN
 2. **チャンネルのずれの再確認。** 直したはずだが user にまだ聴いてもらって
@@ -372,8 +408,8 @@ python tools/cgpy.py                        （import 用）絵を python で測
 python tools/strings.py tmp/SBP98.BIN
 ```
 
-**`out/` は .gitignore なので clone には入っていない。** Ghidra が入って
-いないマシンではそもそも作れない（2026-09-04 の作業機がそれ）。代わりに
+**`out/` は .gitignore なので clone には入っていない。** 作り直しかたは
+下にある。Ghidra を入れる前に作った軽い読み方もそのまま使える:
 
 ```
 python tools/exedis.py fn 1edb:40bc 0x80    そこを逆アセンブル
@@ -388,15 +424,26 @@ python tools/exedis.py find 9a 1d 00 d7 14  バイト列を探す
 **DS はファイルの 0x1aea0**。実行ファイル自身の far call が持っている
 セグメントは Ghidra の表示より 0x1000 小さい。
 
-Ghidra が有るマシンでの結果は `out/sbp98.c`（395 関数の逆コンパイル）と
-`out/sbp98.asm`（18682 命令の逆アセンブル）。作り直すなら
+Ghidra の結果は `out/sbp98.c`（395 関数の逆コンパイル）と
+`out/sbp98.asm`（18682 命令の逆アセンブル）。**2026-09-04 にこの作業機にも
+Ghidra 12.1.3 と Temurin 21 を入れた**（`C:\prog\ghidra\`。パスは
+`~/.claude/CLAUDE.md` にも控えてある）。作り直すなら
 
-```
+```sh
 export JAVA_HOME='C:\prog\ghidra\jdk-21.0.12.1+1'
-cmd //c "C:\prog\ghidra\ghidra_12.1.3_PUBLIC\support\analyzeHeadless.bat" \
-    ghidra_proj sbp -process SBP98.EXE -noanalysis \
+GH="C:\prog\ghidra\ghidra_12.1.3_PUBLIC\support\analyzeHeadless.bat"
+
+# 初回だけ。取り込みと解析で 3 分ほど
+cmd //c "$GH" ghidra_proj sbp -import disk/SBP98.EXE -overwrite
+
+cmd //c "$GH" ghidra_proj sbp -process SBP98.EXE -noanalysis \
     -scriptPath tools/ghidra -postScript DumpAsm.java out/sbp98.asm
+cmd //c "$GH" ghidra_proj sbp -process SBP98.EXE -noanalysis \
+    -scriptPath tools/ghidra -postScript DumpAll.java out/sbp98.c
 ```
+
+`ghidra_proj/` も `out/` も .gitignore。`DumpAll` は 10 分ほどかかる
+（逆コンパイラが重い関数で粘る）ので、途中で切らないこと。
 
 ## 形式は全部 docs にある
 
