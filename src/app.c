@@ -375,6 +375,10 @@ static void play_now(App *a, int stage)
     a->result = RESULT_PLAYING;
     a->overStep = 0;
     a->overTick = 0;
+    /* 1edb:1175 puts the score window on the side the board is not on: the
+     * board's own shift decides it, and it starts at the top either way. */
+    a->scoreX = s->shiftX > 0x10 ? 10 : 0x212;
+    a->scoreY = 10;
     a->screen = SCR_PLAY;
     gfx_palette(&a->gfx, CG_PAL_TILES);
     a->dirty = 1;
@@ -640,6 +644,27 @@ static void go_ending(App *a)
     ending_now(a);
 }
 
+/* FUN_1edb_3a43: the score window hops one corner CLOCKWISE when the man
+ * walks into the corner it is sitting in - not to whichever corner is
+ * furthest, which is what this port did at first and made it flip about.
+ * The man's pixel position is (0x11bb + x) * tile + origin, and the corners
+ * trigger at 0xab / 0x1cb across and 0x83 / 0xef down. */
+static void score_hop(App *a)
+{
+    int px = a->ox + a->game.x * a->px;
+    int py = a->oy + a->game.y * a->px;
+
+    if (a->scoreX == 10 && a->scoreY == 10) {
+        if (px < 0xab && py < 0x83) a->scoreX = 0x212;
+    } else if (a->scoreX == 0x212 && a->scoreY == 10) {
+        if (px > 0x1cb && py < 0x83) a->scoreY = 0x136;
+    } else if (a->scoreX == 0x212 && a->scoreY == 0x136) {
+        if (px > 0x1cb && py > 0xef) a->scoreX = 10;
+    } else if (a->scoreX == 10 && a->scoreY == 0x136) {
+        if (px < 0xab && py > 0xef) a->scoreY = 10;
+    }
+}
+
 static void start_slide(App *a, int dir, int pushed)
 {
     a->facing = app_facing(dir);
@@ -692,8 +717,10 @@ void app_key(App *a, int key)
     case KEY_UP: case KEY_RIGHT: case KEY_DOWN: case KEY_LEFT: {
         int before = a->game.pushes;
         a->facing = app_facing(key);
-        if (game_step(&a->game, key))
+        if (game_step(&a->game, key)) {
             start_slide(a, key, a->game.pushes != before);
+            score_hop(a);
+        }
         /* 1edb:1204's count of boxes off their goals reaching zero is the
          * clear, and that is where BGM 4 comes in; FUN_2329_05b8 stores the
          * step count, which is what turns the grid cell red. */
@@ -722,6 +749,7 @@ void app_key(App *a, int key)
     case KEY_UNDO: {
         int e = a->game.histLen > 0 ? a->game.hist[a->game.histLen - 1] : -1;
         if (e >= 0 && game_undo(&a->game)) {
+            score_hop(a);
             /* FUN_1edb_2c10 takes -1 as its first argument to run a step
              * backwards, so an undo slides the other way. */
             start_slide(a, e & 3, e & 4 ? 1 : 0);
@@ -1054,10 +1082,7 @@ static void draw_play(App *a)
                              : a->lastSprite;
     gfx_tile(&a->gfx, &a->chr, a->px, sprite, mx, my, 1);
 
-    /* FUN_1edb_3a43 keeps the score window out of the man's way by hopping it
-     * between (10,10), (0x212,10), (0x212,0x136) and (10,0x136); this puts it
-     * at whichever of those corners the man is furthest from. */
-    draw_score(a, mx < GFX_W / 2 ? 0x212 : 10, my < GFX_H / 2 ? 0x136 : 10);
+    draw_score(a, a->scoreX, a->scoreY);
 
     /* The clear and failure pictures, dissolved in the way FUN_23b0_0440 does
      * it - see the note in app.h.  Anything that is not colour 0 goes on. */

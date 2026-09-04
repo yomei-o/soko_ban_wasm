@@ -343,6 +343,8 @@ typedef struct {
     int recordStamp;                     /* bumped whenever one changes, so a
                                           * host can tell it has to save */
 
+    int scoreX, scoreY;                  /* 1edb:3a43's corner for the window */
+
     int px;                              /* the board's tile size and origin */
     int ox, oy;
     int boxKind;                         /* which of the fifteen packages */
