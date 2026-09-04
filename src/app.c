@@ -192,6 +192,7 @@ int app_init(App *a, const char *dir)
     mmd2_reset(&a->mmd);
     a->song = -1;
     a->music = 1;
+    a->songNext = -1;
 
     d = slurp(dir, "SBPMEN.DAT", &len);
     if (!d) return -5;
@@ -237,27 +238,52 @@ int app_facing(int dir)
     }
 }
 
+static void song_start(App *a, int n)
+{
+    mmd2_play(&a->mmd, a->bgm[n], a->bgmLen[n], a->voi, a->voiLen);
+    a->song = n;
+    a->audioAcc = 0;
+}
+
 /* [0x128d] guards every FUN_24d7_001d call, so turning the music off just
- * means never starting one. */
+ * means never starting one.
+ *
+ * Every bgm(n) in the game reaches FUN_24d7_00a8 with its flag zero, which is
+ * the fading arm: AH=6 at speed [0x04a6], then `while (AH=8) ;`, then the new
+ * song.  Even asking for the song that is already playing goes the long way
+ * round - 1edb:1554 does exactly that when a stage starts again. */
 void app_music(App *a, int n)
 {
     if (!a->music || n < 0 || n >= BGM_COUNT) {
         mmd2_stop(&a->mmd);
         a->song = -1;
+        a->songNext = -1;
+        a->waitWhat = WAIT_NOTHING;
         return;
     }
-    if (n == a->song && a->mmd.playing) return;
-    mmd2_play(&a->mmd, a->bgm[n], a->bgmLen[n], a->voi, a->voiLen);
-    a->song = n;
-    a->audioAcc = 0;
+    if (a->mmd.playing) {
+        mmd2_fade(&a->mmd, BGM_FADE_SPEED);
+        a->songNext = n;
+        a->songWait = 0;
+        return;
+    }
+    song_start(a, n);
+}
+
+/* Is FUN_24d7_00a8 still spinning? */
+static int music_waiting(const App *a)
+{
+    return a->songNext >= 0;
 }
 
 void app_audio(App *a, short *out, int frames, int rate)
 {
     mmd2_run(&a->mmd, out, frames, rate, &a->audioAcc);
     /* Every track opens with an endless loop, so a song that stops has really
-     * run out; restarting keeps the screen from going quiet. */
-    if (!a->mmd.playing && a->song >= 0) {
+     * run out; restarting keeps the screen from going quiet.  A song that has
+     * been faded out has also stopped, and that one must be left alone: the
+     * wait in app_tick is watching for exactly this. */
+    if (!a->mmd.playing && a->song >= 0 && !music_waiting(a)) {
         int n = a->song;
         a->song = -1;
         app_music(a, n);
@@ -277,7 +303,7 @@ int app_cell(int x, int y)
 
 int app_busy(const App *a)
 {
-    return a->animLeft > 0;
+    return a->animLeft > 0 || music_waiting(a);
 }
 
 /* Tick until the slide is over.  Scripted play and the checks need this; a
@@ -285,16 +311,13 @@ int app_busy(const App *a)
 void app_settle(App *a)
 {
     int guard = 0;
-    while (a->animLeft > 0 && guard++ < 4096) app_tick(a);
+    while ((a->animLeft > 0 || music_waiting(a)) && guard++ < 8192) app_tick(a);
 }
 
-void app_play(App *a, int stage)
+/* The board, once the music is settled. */
+static void play_now(App *a, int stage)
 {
     const Stage *s;
-
-    if (stage < 1 || stage > a->stageCount) return;
-    /* FUN_1edb_042c only enters a stage whose record is under 0x3a99. */
-    if (a->record[stage - 1] > SEL_LOCKED) return;
 
     s = &a->stages[stage - 1];
     game_start(&a->game, s, stage);
@@ -320,8 +343,42 @@ void app_play(App *a, int stage)
     a->overTick = 0;
     a->screen = SCR_PLAY;
     gfx_palette(&a->gfx, CG_PAL_TILES);
-    app_music(a, BGM_PLAY);
     a->dirty = 1;
+}
+
+/* 1edb:1053: the stage's music is asked for at the top of the function, so
+ * the grid stays on the screen until the fade is over. */
+void app_play(App *a, int stage)
+{
+    if (stage < 1 || stage > a->stageCount) return;
+    /* FUN_1edb_042c only enters a stage whose record is under 0x3a99. */
+    if (a->record[stage - 1] > SEL_LOCKED) return;
+
+    app_music(a, BGM_PLAY);
+    if (music_waiting(a)) {
+        a->waitWhat = WAIT_PLAY;
+        a->waitArg = stage;
+        return;
+    }
+    play_now(a, stage);
+}
+
+/* And the same for the way back to the grid. */
+static void select_now(App *a)
+{
+    a->screen = SCR_SELECT;
+    gfx_palette(&a->gfx, CG_PAL_TITLE);
+    a->dirty = 1;
+}
+
+static void go_select(App *a)
+{
+    app_music(a, BGM_SELECT);
+    if (music_waiting(a)) {
+        a->waitWhat = WAIT_SELECT;
+        return;
+    }
+    select_now(a);
 }
 
 static void start_slide(App *a, int dir, int pushed)
@@ -336,6 +393,8 @@ static void start_slide(App *a, int dir, int pushed)
 
 void app_key(App *a, int key)
 {
+    /* The original is inside FUN_24d7_00a8's spin and reads nothing. */
+    if (music_waiting(a)) return;
     if (a->screen == SCR_BOOT) {
         a->screen = SCR_TITLE;
         gfx_palette(&a->gfx, CG_PAL_TITLE);
@@ -343,10 +402,7 @@ void app_key(App *a, int key)
         return;
     }
     if (a->screen == SCR_TITLE) {
-        a->screen = SCR_SELECT;
-        gfx_palette(&a->gfx, CG_PAL_TITLE);
-        app_music(a, BGM_SELECT);
-        a->dirty = 1;
+        go_select(a);
         return;
     }
     if (a->screen == SCR_SELECT) {
@@ -368,12 +424,7 @@ void app_key(App *a, int key)
      * 1edb:15af waits, restarts the stage music and jumps to 0x10cd. */
     if (a->result != RESULT_PLAYING) {
         if (key == KEY_RETRY) app_play(a, a->game.stage);
-        else {
-            a->screen = SCR_SELECT;
-            gfx_palette(&a->gfx, CG_PAL_TITLE);
-            app_music(a, BGM_SELECT);
-        }
-        a->dirty = 1;
+        else go_select(a);
         return;
     }
 
@@ -418,10 +469,8 @@ void app_key(App *a, int key)
         app_play(a, a->game.stage);
         return;
     case KEY_ESC:
-        a->screen = SCR_SELECT;
-        gfx_palette(&a->gfx, CG_PAL_TITLE);
-        app_music(a, BGM_SELECT);
-        break;
+        go_select(a);
+        return;
     default:
         return;
     }
@@ -430,7 +479,7 @@ void app_key(App *a, int key)
 
 void app_move(App *a, int x, int y)
 {
-    if (a->screen != SCR_SELECT) return;
+    if (a->screen != SCR_SELECT || music_waiting(a)) return;
     {
         int c = app_cell(x, y);
         if (c && c != a->pick) { a->pick = c; a->dirty = 1; }
@@ -439,6 +488,8 @@ void app_move(App *a, int x, int y)
 
 void app_click(App *a, int x, int y)
 {
+    /* Nothing is listening while FUN_24d7_00a8 waits out a fade. */
+    if (music_waiting(a)) return;
     if (a->screen == SCR_BOOT || a->screen == SCR_TITLE) {
         app_key(a, KEY_ENTER);
         return;
@@ -521,14 +572,6 @@ void app_tick(App *a)
         a->dirty = 1;
         return;
     }
-    if (a->screen == SCR_PLAY && a->result != RESULT_PLAYING) {
-        if (a->overStep < OVER_PASSES &&
-            ++a->overTick >= OVER_FRAMES) {
-            a->overTick = 0;
-            a->overStep++;
-            a->dirty = 1;
-        }
-    }
     if (a->animLeft > 0) {
         /* 1edb:2c9f: a counter runs 0, 1, then resets to -1 and steps the
          * walk frame, so the frame changes every third sub-step. */
@@ -542,6 +585,32 @@ void app_tick(App *a)
             a->lastSprite = gfx_man(a->facing, a->animPush, a->phase);
             a->animDx = 0;
             a->animDy = 0;
+        }
+    }
+
+    /* FUN_24d7_00a8's `while (AH=8) ;`.  Nothing below here happens until the
+     * driver has finished fading - and nothing above it did in the original
+     * either, since the move had already finished animating by the time the
+     * clear test asked for BGM 4. */
+    if (music_waiting(a)) {
+        if (!a->mmd.playing || ++a->songWait >= BGM_WAIT_TICKS) {
+            int n = a->songNext, what = a->waitWhat, arg = a->waitArg;
+            a->songNext = -1;
+            a->waitWhat = WAIT_NOTHING;
+            song_start(a, n);
+            if (what == WAIT_PLAY) play_now(a, arg);
+            else if (what == WAIT_SELECT) select_now(a);
+        }
+        return;
+    }
+
+    /* 1edb:11d2: the picture only starts to dissolve in once BGM 4 is up. */
+    if (a->screen == SCR_PLAY && a->result != RESULT_PLAYING) {
+        if (a->overStep < OVER_PASSES &&
+            ++a->overTick >= OVER_FRAMES) {
+            a->overTick = 0;
+            a->overStep++;
+            a->dirty = 1;
         }
     }
 }

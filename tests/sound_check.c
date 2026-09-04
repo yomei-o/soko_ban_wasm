@@ -317,6 +317,50 @@ int main(int argc, char **argv)
         free(bgm);
     }
 
+    /* THE FADE-OUT, the driver's AH=6.
+     *
+     * The game never changes song any other way: FUN_24d7_00a8 fades at speed
+     * [0x04a6] = 8, spins until AH=8 says the driver has stopped, and only
+     * then loads the next one.  Seventeen steps of 4 on the FM side, nine
+     * ticks apart, is 612 interrupts, and the close-down count adds 32 - about
+     * three seconds, less whatever the notes and volume codes hurry it along
+     * by, since those call 0x08a8 too. */
+    {
+        unsigned char *bgm;
+        long bgmLen, k, n;
+        double before, after;
+
+        bgm = slurp("disk/SBPBGM2.BGM", &bgmLen);
+        if (!bgm) { printf("FAIL cannot read disk/SBPBGM2.BGM\n"); return 1; }
+
+        mmd2_play(&m, bgm, bgmLen, voi, voiLen);
+        run(&m, buf, RATE);
+        before = rms(buf, RATE);
+        mmd2_fade(&m, 8);
+        ok(m.playing, "the fade does not stop the song on the spot");
+        run(&m, buf, RATE * 2);
+        /* The last half second of the two, not the average: a song is
+         * still loud at the start of its fade. */
+        after = rms(buf + RATE * 3 / 2, RATE / 2);
+        printf("  fade: rms %.0f -> %.0f two seconds in\n", before, after);
+        ok(after < before / 10, "two seconds of fading takes the song down");
+
+        /* Again, counting interrupts rather than samples. */
+        mmd2_play(&m, bgm, bgmLen, voi, voiLen);
+        for (k = 0; k < 400; k++) mmd2_tick(&m);
+        mmd2_fade(&m, 8);
+        for (n = 0; m.playing && n < 5000; n++) mmd2_tick(&m);
+        printf("  fade: the driver stops itself after %ld interrupts "
+               "(%.2f s)\n", n, (double)n / (MMD2_CLOCK / (double)MMD2_TIMER_DIV));
+        ok(n > 400 && n < 700, "the fade runs about three seconds");
+        ok(!m.playing, "and the driver then says it has stopped");
+
+        /* A fade with nothing playing is a plain stop, 0x0130. */
+        mmd2_fade(&m, 8);
+        ok(!m.playing, "fading silence stops rather than hangs");
+        free(bgm);
+    }
+
     free(voi);
     if (fails) printf("%d checks failed\n", fails);
     else printf("all sound checks passed\n");

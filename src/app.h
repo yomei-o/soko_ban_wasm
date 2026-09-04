@@ -137,6 +137,21 @@ enum { SCR_BOOT, SCR_TITLE, SCR_SELECT, SCR_PLAY };
 #define BGM_END 1
 #define BGM_COUNT 6
 
+/* [0x04a6], the speed the game hands to the driver's AH=6, and what it costs:
+ * seventeen steps nine ticks apart, plus the close-down count, is about 2.8
+ * seconds.
+ *
+ * BGM_WAIT_TICKS is this port's own safety net rather than anything the game
+ * has.  The driver's clock here is the audio callback, and a browser that has
+ * not been given a gesture yet - or a host with no sound at all, like the
+ * shot tool - never calls it, so the wait would never end.  Longer than the
+ * fade can take, so it only ever fires when nothing is being heard anyway. */
+#define BGM_FADE_SPEED 8
+#define BGM_WAIT_TICKS 200
+
+/* What the wait does once the fade is over. */
+enum { WAIT_NOTHING, WAIT_SELECT, WAIT_PLAY };
+
 /* FUN_23b0_0440 does not blit the clear picture on: it dissolves it in.
  *
  *     ax = 0
@@ -200,6 +215,16 @@ typedef struct {
     long bgmLen[BGM_COUNT];
     int song;                             /* which one is playing, or -1 */
     int music;                            /* [0x128d]: is BGM on at all */
+
+    /* FUN_24d7_00a8 does not come back until the driver has finished fading:
+     * it asks for the fade, spins on AH=8, and only then loads the next song.
+     * The game stands still for those three seconds - the screen it was on
+     * stays up, keys do nothing, the clear picture does not begin to dissolve
+     * - so whatever the caller meant to do next waits here with the song. */
+    int songNext;                         /* the song the wait will load */
+    int songWait;                         /* ticks waited; see BGM_WAIT_TICKS */
+    int waitWhat;                         /* WAIT_*: what happens afterwards */
+    int waitArg;
     long audioAcc;                        /* the fraction of a tick carried */
     int bootPhase;                        /* 0..5, the sequence below */
     int bootStep;                         /* steps done inside a phase */

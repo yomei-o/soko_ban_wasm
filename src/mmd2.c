@@ -103,13 +103,54 @@ static void fm_level(Mmd2 *m, int ch, int voice, int level)
     }
 }
 
+/* 0x08a8's front half: the fade-out.
+ *
+ * Each channel has a (count, attenuation) pair.  Every call bumps the count,
+ * and when it reaches the speed the attenuation takes a step - 4 on the FM
+ * side up to 0x7f (0x0921), 1 on the SSG side up to 15 (0x08d8) - and the
+ * level that is about to be written moves by it.  FM levels are attenuations
+ * so they go up; SSG volumes are volumes so they go down.
+ *
+ * The count is bumped by the CALL, not by the tick, which is why 0x05d3 calls
+ * this once a tick per track while a fade is running: notes and volume codes
+ * call it too, so a busy channel fades slightly faster than a quiet one. */
+static int fade_level(Mmd2 *m, int t, int level)
+{
+    int speed = m->fade & 0x7f, a;
+
+    if (!(m->fade & 0x80)) return level;
+    if (m->fadeCount[t] == speed) {
+        m->fadeCount[t] = 0;
+        a = m->fadeAtten[t] + (t < MMD2_FM ? 4 : 1);
+        if (t < MMD2_FM) m->fadeAtten[t] = a >= 0x80 ? 0x7f : a;
+        else m->fadeAtten[t] = a >= 0x0f ? 0x0f : a;
+    } else {
+        m->fadeCount[t]++;
+    }
+    a = m->fadeAtten[t];
+    if (t < MMD2_FM) {
+        level += a;                      /* 0x0931 */
+        return level >= 0x80 ? 0x7f : level;
+    }
+    level -= a;                          /* 0x08ea */
+    return level < 0 ? 0 : level;
+}
+
 /* 0x08a8 as a whole: the level out to whichever half of the chip the track
- * lives on. */
+ * lives on.
+ *
+ * The SSG side differs from the driver in one byte and only when the volume
+ * has reached nought: 0x08fd sends 0xff rather than 0, which on the chip is
+ * "follow the envelope generator".  The driver never writes registers 11, 12
+ * or 13, so that generator is never started and the channel is silent either
+ * way - and ssg.c has no envelope generator, so 0xff would come out as full
+ * volume.  0 is what the chip actually sounds like. */
 static void apply_level(Mmd2 *m, int t)
 {
     Mmd2Track *tr = &m->tr[t];
-    if (t < MMD2_FM) fm_level(m, t, tr->voice, tr->level);
-    else reg(m, 8 + (t - MMD2_FM), tr->level & 15);
+    int level = fade_level(m, t, tr->level);
+    if (t < MMD2_FM) fm_level(m, t, tr->voice, level);
+    else reg(m, 8 + (t - MMD2_FM), level & 15);
 }
 
 /* 0x09f6: the pitch word out.  For FM register 0xa4 + ch takes
@@ -187,6 +228,13 @@ static void key_on(Mmd2 *m, int t, int note)
         }
         reg(m, 7, m->mixer);
     }
+}
+
+void mmd2_fade(Mmd2 *m, int speed)
+{
+    if (!m->playing) { mmd2_stop(m); return; }   /* 0x0130 */
+    if (m->fade & 0x80) return;                  /* 0x013d: one at a time */
+    m->fade = (speed & 0x7f) | 0x80;             /* 0x0420 */
 }
 
 void mmd2_stop(Mmd2 *m)
@@ -415,6 +463,26 @@ void mmd2_tick(Mmd2 *m)
     int t, advance;
 
     if (!m->playing) return;
+
+    /* 0x0288: while the close-down count is up, the interrupt does no music
+     * at all - it just adds 8 to a byte, and when that wraps the driver stops
+     * calling itself playing.  Thirty-two interrupts, an eighth of a second. */
+    if (m->closing) {
+        m->closing = (m->closing + 8) & 0xff;
+        if (!m->closing) m->playing = 0;
+        return;
+    }
+
+    /* 0x048d's head: the fade is over when every FM channel has gone past
+     * [0x0f7d].  0x0374 clears the player and the fade, 0x041b re-opens the
+     * song, and the count at 0x0cc8 starts. */
+    if (m->fadeAtten[0] > MMD2_FADE_END && m->fadeAtten[1] > MMD2_FADE_END &&
+        m->fadeAtten[2] > MMD2_FADE_END) {
+        mmd2_play(m, m->song, m->songLen, m->voi, m->voiLen);
+        m->closing = 8;
+        return;
+    }
+
     m->ticks++;
     /* 0x04dd: 0x40 into a byte, and the lengths only move when it wraps. */
     m->tickAcc = (m->tickAcc + MMD2_TEMPO_ADD) & 0xff;
@@ -423,22 +491,29 @@ void mmd2_tick(Mmd2 *m)
 
     for (t = 0; t < MMD2_TRACKS; t++) {
         Mmd2Track *tr = &m->tr[t];
-        int guard = 0;
+        int guard = 0, applied;
         if (!tr->active) continue;
         if (tr->count > 0) tr->count--;
 
         /* 0x05a5: the level envelope.  The bound at 0x05b1 is an 8-bit add
          * whose carry decides which way the limit is a stop - a positive delta
          * climbs to it, a negative one falls to it. */
+        applied = 0;
         if (tr->lvlCount > 0 && --tr->lvlCount == 0) {
             int sum = (tr->level + tr->lvlDelta) & 0xff;
             int carried = tr->level + tr->lvlDelta > 0xff;
             if (carried ? sum >= tr->lvlLimit : sum <= tr->lvlLimit) {
                 tr->level = sum;
                 apply_level(m, t);
+                applied = 1;
             }
             tr->lvlCount = tr->lvlPeriod;
         }
+
+        /* 0x05d3: every path that did not just write the level comes through
+         * here, and while a fade is running it writes it anyway - which is
+         * what walks the ramp along. */
+        if (!applied && (m->fade & 0x80)) apply_level(m, t);
 
         /* 0x05e6: the pitch slide, every `period` ticks and unbounded. */
         if (tr->sldCount > 0 && --tr->sldCount == 0) {

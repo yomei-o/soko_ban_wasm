@@ -112,7 +112,17 @@ typedef struct {
     Mmd2Track tr[MMD2_TRACKS];
     int mixer;                          /* 0x0de8, the shadow of SSG reg 7 */
     int tickAcc;                        /* 0x0de6 */
-    int playing;
+    int playing;                        /* 0x0f80, what AH=8 hands back */
+
+    /* The fade-out.  0x0f6e is the speed with bit 7 for "running", and
+     * 0x0f6f.. is a (count, attenuation) pair per channel - three FM then
+     * three SSG, which is this port's track order.  0x0cc8 is the byte the
+     * interrupt counts up by 8 once the fade is over. */
+    int fade;
+    int fadeCount[MMD2_TRACKS];
+    int fadeAtten[MMD2_TRACKS];
+    int closing;
+
     long ticks;
 } Mmd2;
 
@@ -124,6 +134,21 @@ int mmd2_play(Mmd2 *m, const unsigned char *song, long songLen,
               const unsigned char *voi, long voiLen);
 
 void mmd2_stop(Mmd2 *m);
+
+/* 0x012c, the driver's AH=6: fade the song out at `speed`, which is how long
+ * the ramp waits between steps.  A song that is not playing is stopped
+ * instead (0x0130), and a fade already running is left alone (0x013d).
+ *
+ * The fade does not stop the song by itself: 0x048d watches the three FM
+ * channels and, when every one of them has faded past MMD2_FADE_END, resets
+ * the player and starts the count at 0x0cc8, and when THAT wraps `playing`
+ * goes to 0.  The game leans on it - FUN_24d7_00a8 fades, spins on AH=8 until
+ * the driver says it has stopped, and only then loads the next song. */
+void mmd2_fade(Mmd2 *m, int speed);
+
+/* [0x0f7d]: the FM attenuation every channel has to pass for the fade to be
+ * over.  Steps of 4 from 0, so seventeen of them. */
+#define MMD2_FADE_END 0x40
 
 /* One OPN timer interrupt. */
 void mmd2_tick(Mmd2 *m);

@@ -24,6 +24,12 @@ SokoBan().then(M => {
   ok(M._soko_screen() === SCR.BOOT, 'it opens on the loading logo');
 
   // A frame has to be real pixels, not a blank buffer.
+  // Every screen change fades the song out first and does not come back
+  // until the driver says it has stopped, so the checks have to let the wait
+  // run - _soko_settle ticks until it is over.  Nothing is pulling audio here,
+  // so it ends on BGM_WAIT_TICKS rather than on the fade itself.
+  function settle() { M._soko_settle(); }
+
   function pixels() {
     const p = M._soko_frame();
     return M.HEAPU8.subarray(p, p + W * H * 4);
@@ -69,6 +75,7 @@ SokoBan().then(M => {
   ok(M._soko_pick() === 30, 'outside the panel changes nothing');
 
   M._soko_click(32 + 5, 40 + 5);
+  settle();
   ok(M._soko_screen() === SCR.PLAY, 'clicking a cell starts the stage');
   ok(M._soko_stage() === 1, 'and it is stage 1');
   ok(M._soko_target() === 71, 'stage 1 asks for 71 moves');
@@ -109,11 +116,13 @@ SokoBan().then(M => {
   press(KEY.RETRY);
   ok(M._soko_moves() === 0, 'retry resets the stage');
   M._soko_key(KEY.ESC);
+  settle();
   ok(M._soko_screen() === SCR.SELECT, 'escape goes back to the grid');
 
   // Every stage has to start and draw without falling over.
   for (let n = 1; n <= 30; n++) {
     M._soko_play(n);
+    settle();
     ok(M._soko_stage() === n, 'stage ' + n + ' starts');
     ok(M._soko_boxes() > 0, 'stage ' + n + ' has boxes');
     const q = pixels();
@@ -124,6 +133,7 @@ SokoBan().then(M => {
 
   // Stage 24 is the one where a single push moves a box off its goal.
   M._soko_play(24);
+  settle();
   const before = M._soko_done();
   press(KEY.RIGHT);
   ok(M._soko_pushes() === 1, 'stage 24: one push');
@@ -134,6 +144,7 @@ SokoBan().then(M => {
   // The solver's answer for stage 1, played through the wasm.  43 moves,
   // inside the stage's own limit of 71.
   M._soko_play(1);
+  settle();
   const RUN = 'uuldllldlurrrrrddllulluldrrrdrrullllrrrulll';
   const K = { u: KEY.UP, r: KEY.RIGHT, d: KEY.DOWN, l: KEY.LEFT };
   for (const c of RUN) press(K[c]);
@@ -159,12 +170,41 @@ SokoBan().then(M => {
   // plays SBPBGM4 when that is zero - so 4 is the clear music and 2 is what
   // plays while a stage is being played.
   M._soko_play(1);
+  settle();
   ok(M._soko_song() === 2, 'a stage plays SBPBGM2');
   let r = audio(4096);
   for (let i = 0; i < 20 && r < 50; i++) r = audio(4096);
   ok(r > 50, 'the stage music makes a signal (rms ' + r.toFixed(0) + ')');
 
-  M._soko_key(KEY.ESC);
+  // THE FADE.  FUN_24d7_00a8 asks the driver for AH=6 and then spins on AH=8
+  // until it says it has stopped, so a screen change is not instant: the board
+  // stays up, the stage's music gets quieter, and the grid only appears when
+  // the fade is over, about three seconds later.  Here the page's own two
+  // loops are turned by hand - audio pulls samples, _soko_tick is the frame -
+  // and it is the audio one that has to finish the fade, so the tick count is
+  // kept well under the BGM_WAIT_TICKS safety net.
+  {
+    let loud = audio(4096);
+    for (let i = 0; i < 20 && loud < 50; i++) loud = audio(4096);
+    M._soko_key(KEY.ESC);
+    ok(M._soko_screen() === SCR.PLAY, 'the board stays up while the song fades');
+    ok(M._soko_song() === 2, 'and it is still the stage music playing');
+    let frames = 0, ticks = 0, last = loud;
+    while (M._soko_screen() === SCR.PLAY && ticks < 150) {
+      last = audio(2048);
+      frames += 2048;
+      M._soko_tick();
+      ticks++;
+    }
+    const secs = frames / 44100;
+    console.log('  fade: the grid appears after ' + secs.toFixed(2) + ' s of audio, rms ' + loud.toFixed(0) + ' -> ' + last.toFixed(0));
+    ok(M._soko_screen() === SCR.SELECT, 'the grid comes up when the fade ends');
+    ok(secs > 2 && secs < 3.5,
+       'the fade takes about three seconds (' + secs.toFixed(2) + ')');
+    ok(last < loud / 4,
+       'and the song is quiet by then (' + loud.toFixed(0) + ' -> ' +
+       last.toFixed(0) + ')');
+  }
   ok(M._soko_song() === 0, 'the grid plays SBPBGM0');
   ok(M._soko_result() === 0, 'and nothing is finished');
   r = audio(4096);
@@ -176,6 +216,7 @@ SokoBan().then(M => {
   // so what this checks is that it dies away.
   // Walking past the limit is the failure at 1edb:14bb, which plays SBPBGM3.
   M._soko_play(1);
+  settle();
   ok(M._soko_target() === 71, 'stage 1 allows 71 steps');
   for (let i = 0; i < 71; i++) press(i & 1 ? KEY.RIGHT : KEY.LEFT);
   ok(M._soko_moves() === 71, 'walked to the limit');
