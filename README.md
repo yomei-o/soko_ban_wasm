@@ -41,8 +41,10 @@ TRACE / OPTION、それに記録の保存。**
 * [x] **画面が変わるときのフェードアウト** — 原作は曲を止める手段をこれしか
       持っていない。AH=0x06 で約 2.8 秒かけて落とし、**ドライバが止まるまで
       ゲームごと待つ**（前の画面が出たまま）
-* [ ] エンディング（`END1` / `END2` / `STAFF1,3,4` と BGM 1）。30 面全部
-      クリアすると出る。入口と並びは RESUME に書いた
+* [x] **エンディング** — 30 面全部クリアすると面選択の輪の中から始まり、
+      二度と戻らない。`END1` → スタッフロール → `END2` → SPECIAL THANKS →
+      COPYRIGHT を 3 種類の散らし（重ねる・置き換える・黒へ消す）で
+      入れ替える無限ループ。BGM 1
 * [ ] TRACE（手順の記録・再生）と OPTION / EDIT
 * [ ] 記録の保存（`SBPUSER.DAT` 相当を localStorage に）
 * [ ] `FONT.CG` の字形（42 バイト固定長までは分かったが並びが未確定）
@@ -55,6 +57,8 @@ sh tools/build.sh check          全部ビルドして検査して PNG を吐く
 sh tools/build.sh wasm           soko.js / soko.wasm だけ
 ./tmp/soko_shot.exe screen select tmp/sel.png --pick 11
 ./tmp/soko_shot.exe screen 1 tmp/play.png --press rrdd
+./tmp/soko_shot.exe screen end tmp/end.png --ticks 430
+./tmp/end_check.exe              エンディングの順番を検定する
 ./tmp/soko_shot.exe pic disk/TITLE.CG tmp/title.png --pal 0
 node tests/wasm_check.js
 ./tmp/sound_check.exe            音程・音量・6 曲を検定する

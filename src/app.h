@@ -100,7 +100,7 @@
 #define SCORE_LIMIT_X 0x32
 #define SCORE_LIMIT_Y 0x3d
 
-enum { SCR_BOOT, SCR_TITLE, SCR_SELECT, SCR_PLAY };
+enum { SCR_BOOT, SCR_TITLE, SCR_SELECT, SCR_PLAY, SCR_END };
 
 /* Which song goes where.  FUN_24d7_001d jumps through a table at 24d7:0034
  * whose case n pushes the DS offset of "sbpbgm<n>.bgm", so n is the file
@@ -150,7 +150,7 @@ enum { SCR_BOOT, SCR_TITLE, SCR_SELECT, SCR_PLAY };
 #define BGM_WAIT_TICKS 200
 
 /* What the wait does once the fade is over. */
-enum { WAIT_NOTHING, WAIT_SELECT, WAIT_PLAY };
+enum { WAIT_NOTHING, WAIT_SELECT, WAIT_PLAY, WAIT_END };
 
 /* FUN_23b0_0440 does not blit the clear picture on: it dissolves it in.
  *
@@ -181,6 +181,69 @@ enum { WAIT_NOTHING, WAIT_SELECT, WAIT_PLAY };
 #define OVER_FRAMES 2                    /* frames a pass; the original's speed
                                           * is whatever the VRAM allows */
 
+/* THE ENDING - FUN_1edb_40bc.
+ *
+ * The grid's loop asks FUN_1edb_427c whether all thirty are cleared (it counts
+ * the cells by reading their pixels; the port asks its own records) and, when
+ * they are, never comes back: the ending is an endless loop of five pictures.
+ *
+ *     bgm(1)
+ *     loop:
+ *       page(1) end1        the picture is decoded into the hidden page
+ *       page(0) 00f9        the screen is scattered away to black
+ *               010e        the ending palette goes on
+ *       page(1) 0180        the hidden page is saved to the buffer at 0x80000
+ *       page(0) 01f5        and scattered back on, black and all
+ *               wait 5000
+ *       page(1) 1a83 staff1
+ *       page(0) 0440        the credits scatter on, colour 0 transparent
+ *               wait 8192
+ *               01f5        the buffer comes back, wiping the credits
+ *       page(1) end2 0180
+ *       page(0) 01f5
+ *       page(1) 1a83 staff3
+ *       page(0) 0440
+ *       page(1) 1a83 staff4
+ *               wait 4000
+ *       page(0) 01f5 0440   end2 back, then staff4 on top
+ *               wait 7000
+ *               0019        the hidden page replaces the screen: black plus
+ *                           the staff4 strip, nothing else
+ *               wait 4096
+ *
+ * All three effects are the same twenty-one pass, 42-byte scatter as the clear
+ * picture (OVER_* above); they differ only in what lands:
+ *
+ *     0440   colour 0 is left alone            the picture goes on top
+ *     01f5   the source lands as it is         the buffer replaces the screen
+ *     0019   the same, but out of the hidden page rather than the buffer
+ *     00f9   nothing lands; the screen clears  four pixels at a time, four
+ *                                              sub-passes to a pass
+ *
+ * The waits are milliseconds - FUN_28a3_000e counts HSYNCs with a constant
+ * INT 18h picked for the machine's speed, 100ms a hundred units.  The port's
+ * tick is the browser's frame, so END_MS turns them into frames. */
+#define END_MS(n) ((n) * 6 / 100)
+
+enum {
+    END_LOAD1,        /* end1 into the buffer */
+    END_ERASE,        /* 00f9 */
+    END_IN1,          /* 01f5, end1 */
+    END_HOLD1,        /* 5000 */
+    END_STAFF1,       /* 0440, staff1 */
+    END_HOLD2,        /* 8192 */
+    END_BACK1,        /* 01f5, end1 again */
+    END_IN2,          /* end2 into the buffer, then 01f5 */
+    END_STAFF3,       /* 0440, staff3 */
+    END_STAFF4,       /* staff4 is loaded and the screen waits 4000 */
+    END_BACK2,        /* 01f5, end2 again */
+    END_STAFF4_IN,    /* 0440, staff4 */
+    END_HOLD3,        /* 7000 */
+    END_STRIP,        /* 0019: the hidden page replaces the screen */
+    END_HOLD4,        /* 4096, then round again */
+    END_STEPS
+};
+
 /* What a stage ended as.  FUN_1edb_3182 == 0 is a clear; the steps reaching
  * the limit at 1edb:14bb is a failure. */
 enum { RESULT_PLAYING, RESULT_CLEAR, RESULT_FAIL };
@@ -195,6 +258,9 @@ typedef struct {
     Gfx gfx;
     Cg title, select, chr, windows, logo;
     Cg clear, clearMask, peke, pekeMask;
+    /* The ending's two pages: `endBuf` is the RAM at 0x80000 that holds the
+     * END picture, `endTop` the hidden VRAM page a staff strip sits in. */
+    Cg endBuf, endTop;
     Font font;
     Stage stages[MEN_STAGES];
     int stageCount;
@@ -207,6 +273,8 @@ typedef struct {
     int bootTick;
     unsigned char bootPal[16][3];         /* the loading screen's own palette */
     unsigned char logoPlane[LOGO_PLANE];  /* the one plane the logo lives in */
+
+    char dir[64];                        /* where the game's files are */
 
     Mmd2 mmd;
     unsigned char voi[1024];
@@ -234,6 +302,11 @@ typedef struct {
     int px;                              /* the board's tile size and origin */
     int ox, oy;
     int boxKind;                         /* which of the fifteen packages */
+    int endStep;                         /* END_* */
+    int endPass;                         /* 0..OVER_PASSES, the scatter */
+    int endSub;                          /* 0..3 inside an erase pass */
+    int endFrame;                        /* frames spent on this pass or wait */
+
     int result;                          /* RESULT_* */
     int overStep;                        /* how much of the picture is in */
     int overTick;

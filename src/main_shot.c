@@ -107,7 +107,7 @@ int main(int argc, char **argv)
     long len;
 
     if (argc < 3) {
-        fprintf(stderr, "usage: soko_shot screen boot|title|select|<n> <out.png>\n"
+        fprintf(stderr, "usage: soko_shot screen boot|title|select|end|<n> <out.png>\n"
                         "       soko_shot board <n> <out.png> [--press rrdd]\n"
                         "       soko_shot pic <file.cg> <out.png> [--pal n]\n"
                         "       soko_shot tiles <out.png> [40|32]\n");
@@ -165,6 +165,15 @@ int main(int argc, char **argv)
         else if (!strcmp(which, "title")) {
             app.screen = SCR_TITLE;
             gfx_palette(&app.gfx, CG_PAL_TITLE);   /* app_key's, skipped here */
+        }
+        else if (!strcmp(which, "end")) {
+            /* The ending only happens when all thirty are cleared, so say so
+             * and let the grid's own test start it. */
+            int n;
+            for (n = 0; n < MEN_STAGES; n++) app.record[n] = 1;
+            app.screen = SCR_SELECT;
+            gfx_palette(&app.gfx, CG_PAL_TITLE);
+            app_render(&app);            /* the grid is what it erases */
         }
         else if (!strcmp(which, "select")) {
             app.screen = SCR_SELECT;

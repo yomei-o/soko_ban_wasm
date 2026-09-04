@@ -143,14 +143,17 @@
   }
 
   function status() {
+    // 0 起動ロゴ / 1 タイトル / 2 面選択 / 3 盤面 / 4 エンディング
     var scr = M._soko_screen();
     if (scr === 0) { hud.textContent = 'クリックかキーで始めます'; return; }
-    if (scr === 1) {
+    if (scr === 1) { hud.textContent = 'クリックかキーで面選択へ'; return; }
+    if (scr === 2) {
       var pick = M._soko_pick();
       hud.innerHTML = '面を選んでください' +
         (pick ? ' — <b>' + pick + '</b>' : '');
       return;
     }
+    if (scr === 4) { hud.textContent = '全 30 面クリア — エンディング'; return; }
     var won = M._soko_won();
     hud.innerHTML = '面 <b>' + M._soko_stage() + '</b>' +
       ' / 手数 <b>' + M._soko_moves() + '</b>' +

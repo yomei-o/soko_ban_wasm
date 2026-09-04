@@ -23,6 +23,7 @@ if [ "$what" = all ] || [ "$what" = native ] || [ "$what" = check ]; then
         src/cg.c
     $CC -o tmp/sound_check.exe tests/sound_check.c src/mmd2.c src/opn.c \
         src/ssg.c -lm
+    $CC -o tmp/end_check.exe  tests/end_check.c $CORE
 fi
 
 if [ "$what" = all ] || [ "$what" = wasm ]; then
@@ -32,6 +33,7 @@ fi
 if [ "$what" = check ]; then
     echo "== checks"
     ./tmp/game_check.exe
+    ./tmp/end_check.exe
     ./tmp/sound_check.exe
     echo "== shots"
     ./tmp/soko_shot.exe board 1 tmp/s01.png
@@ -43,6 +45,7 @@ if [ "$what" = check ]; then
     ./tmp/soko_shot.exe screen title  tmp/scr_title.png
     ./tmp/soko_shot.exe screen select tmp/scr_select.png --pick 11
     ./tmp/soko_shot.exe screen 1      tmp/scr_play.png --press rrd
+    ./tmp/soko_shot.exe screen end    tmp/scr_end.png --ticks 430
     if [ -f soko.js ]; then
         echo "== wasm checks"
         PATH="/c/prog/emsdk/emsdk/node/22.16.0_64bit/bin:$PATH"             node tests/wasm_check.js

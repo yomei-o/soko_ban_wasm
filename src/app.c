@@ -156,6 +156,9 @@ int app_init(App *a, const char *dir)
     int k;
 
     memset(a, 0, sizeof *a);
+    /* The ending loads its five pictures as it needs them, so where they came
+     * from has to outlive app_init. */
+    snprintf(a->dir, sizeof a->dir, "%s", dir ? dir : ".");
     if (load_cg(&a->title, dir, "TITLE.CG", 4)) return -1;
     if (load_cg(&a->select, dir, "SELECT.CG", 4)) return -2;
     if (load_cg(&a->chr, dir, "CHR98N.CG", 4)) return -3;
@@ -381,6 +384,202 @@ static void go_select(App *a)
     select_now(a);
 }
 
+/* --- the ending, FUN_1edb_40bc -------------------------------------------
+ *
+ * app.h has the whole loop written out.  What follows is the three effects it
+ * scatters with and the state machine that walks them.
+ */
+
+/* 2406:042f: a staff strip.  Eighty bytes a row and 0x1d = 29 rows, read into
+ * VRAM offset 16000 - row 200, the middle of the screen.  The file holds two
+ * planes' worth and the seek between the reads is absolute (0x910), so the
+ * SECOND half is read three times over, into b000, b800 and e000: the strip
+ * has four colours, 0, 1, 14 and 15. */
+#define STAFF_ROW 200
+#define STAFF_ROWS 0x1d
+#define STAFF_BYTES ((GFX_W / 8) * STAFF_ROWS)           /* 0x910 */
+
+static int load_staff_strip(Cg *out, const char *dir, const char *name)
+{
+    long len, k;
+    unsigned char *d = slurp(dir, name, &len);
+    int p;
+
+    if (!d) return -1;
+    memset(out, 0, sizeof *out);
+    out->planes = CG_PLANES;
+    for (p = 0; p < CG_PLANES; p++) {
+        long src = p == 0 ? 0 : STAFF_BYTES;
+        for (k = 0; k < STAFF_BYTES; k++) {
+            long at = (long)STAFF_ROW * (GFX_W / 8) + k;
+            if (src + k < len) out->plane[p][at] = d[src + k];
+        }
+    }
+    free(d);
+    return 0;
+}
+
+enum { SCAT_OVER, SCAT_REPLACE, SCAT_ERASE };
+
+/* One pass of the 42-byte scatter over the whole screen: the word at
+ * `pass * 2`, then every OVER_STRIDE bytes, sixteen pixels at a time.
+ *
+ * SCAT_ERASE does it four pixels at a time - 0x00f9 ANDs with ~ror(0xf0,cl)
+ * for cl = 0, 4, 8, 12, which is pixels 0..3, 4..7, 8..11 and 12..15 of the
+ * word - and the four sub-passes run back to back, as they do there. */
+static void scatter_pass(App *a, const Cg *src, int pass, int mode)
+{
+    long o;
+
+    for (o = (long)pass * 2; o < CG_PLANE - 1; o += OVER_STRIDE) {
+        int row = (int)(o / (GFX_W / 8)), col = (int)(o % (GFX_W / 8));
+        int k;
+        if (row >= GFX_H) break;
+        for (k = 0; k < 16; k++) {
+            int x = col * 8 + k, v;
+            if (x >= GFX_W) break;
+            if (mode == SCAT_ERASE) { a->gfx.px[row][x] = 0; continue; }
+            v = cg_pixel(src, x, row);
+            if (mode == SCAT_OVER && !v) continue;
+            a->gfx.px[row][x] = (unsigned char)v;
+        }
+    }
+}
+
+/* A pass every OVER_FRAMES frames, twenty-one of them.  Returns 1 when the
+ * whole scatter is done. */
+static int end_scatter(App *a, const Cg *src, int mode)
+{
+    if (++a->endFrame < OVER_FRAMES) return 0;
+    a->endFrame = 0;
+    scatter_pass(a, src, a->endPass, mode);
+    a->dirty = 1;
+    return ++a->endPass >= OVER_PASSES;
+}
+
+static int end_wait(App *a, int frames)
+{
+    return ++a->endFrame >= frames;
+}
+
+/* Whatever the step needs before its first frame: the loads the original does
+ * into the hidden page. */
+static void end_enter(App *a, int step)
+{
+    a->endStep = step;
+    a->endPass = 0;
+    a->endSub = 0;
+    a->endFrame = 0;
+    switch (step) {
+    case END_LOAD1:
+        load_cg(&a->endBuf, a->dir, "END1.CG", 4);
+        break;
+    case END_IN2:
+        load_cg(&a->endBuf, a->dir, "END2.CG", 4);
+        break;
+    case END_STAFF1:
+        /* 2406:0213 reads 32000 bytes into a800 and 32000 into b000 and then
+         * runs out of file, so STAFF1.CG is two planes on a cleared page. */
+        load_cg(&a->endTop, a->dir, "STAFF1.CG", 2);
+        break;
+    case END_STAFF3:
+        load_staff_strip(&a->endTop, a->dir, "STAFF3.CG");
+        break;
+    case END_STAFF4:
+        load_staff_strip(&a->endTop, a->dir, "STAFF4.CG");
+        break;
+    default:
+        break;
+    }
+}
+
+static void end_tick(App *a)
+{
+    switch (a->endStep) {
+    case END_LOAD1:
+        end_enter(a, END_ERASE);
+        break;
+    case END_ERASE:
+        if (end_scatter(a, NULL, SCAT_ERASE)) {
+            gfx_palette(&a->gfx, CG_PAL_END);            /* 2406:010e */
+            end_enter(a, END_IN1);
+        }
+        break;
+    case END_IN1:
+        if (end_scatter(a, &a->endBuf, SCAT_REPLACE)) end_enter(a, END_HOLD1);
+        break;
+    case END_HOLD1:
+        if (end_wait(a, END_MS(5000))) end_enter(a, END_STAFF1);
+        break;
+    case END_STAFF1:
+        if (end_scatter(a, &a->endTop, SCAT_OVER)) end_enter(a, END_HOLD2);
+        break;
+    case END_HOLD2:
+        if (end_wait(a, END_MS(8192))) end_enter(a, END_BACK1);
+        break;
+    case END_BACK1:
+        if (end_scatter(a, &a->endBuf, SCAT_REPLACE)) end_enter(a, END_IN2);
+        break;
+    case END_IN2:
+        if (end_scatter(a, &a->endBuf, SCAT_REPLACE)) end_enter(a, END_STAFF3);
+        break;
+    case END_STAFF3:
+        if (end_scatter(a, &a->endTop, SCAT_OVER)) end_enter(a, END_STAFF4);
+        break;
+    case END_STAFF4:
+        if (end_wait(a, END_MS(4000))) end_enter(a, END_BACK2);
+        break;
+    case END_BACK2:
+        if (end_scatter(a, &a->endBuf, SCAT_REPLACE))
+            end_enter(a, END_STAFF4_IN);
+        break;
+    case END_STAFF4_IN:
+        if (end_scatter(a, &a->endTop, SCAT_OVER)) end_enter(a, END_HOLD3);
+        break;
+    case END_HOLD3:
+        if (end_wait(a, END_MS(7000))) end_enter(a, END_STRIP);
+        break;
+    case END_STRIP:
+        /* 23b0:0019: the hidden page - black and the staff4 strip - replaces
+         * the screen, so everything else scatters away. */
+        if (end_scatter(a, &a->endTop, SCAT_REPLACE)) end_enter(a, END_HOLD4);
+        break;
+    default:
+        if (end_wait(a, END_MS(4096))) end_enter(a, END_LOAD1);
+        break;
+    }
+}
+
+/* 1edb:053d: the grid's loop asks FUN_1edb_427c whether every cell looks
+ * cleared.  It counts them by reading the screen; the records say the same
+ * thing, and draw_select paints a cell from exactly this test. */
+static int all_cleared(const App *a)
+{
+    int n;
+    for (n = 0; n < a->stageCount; n++) {
+        int rec = a->record[n];
+        if (!(rec != 0 && rec < SEL_LOCKED)) return 0;
+    }
+    return a->stageCount > 0;
+}
+
+static void ending_now(App *a)
+{
+    a->screen = SCR_END;
+    end_enter(a, END_LOAD1);
+    a->dirty = 1;
+}
+
+static void go_ending(App *a)
+{
+    app_music(a, BGM_END);
+    if (music_waiting(a)) {
+        a->waitWhat = WAIT_END;
+        return;
+    }
+    ending_now(a);
+}
+
 static void start_slide(App *a, int dir, int pushed)
 {
     a->facing = app_facing(dir);
@@ -393,8 +592,9 @@ static void start_slide(App *a, int dir, int pushed)
 
 void app_key(App *a, int key)
 {
-    /* The original is inside FUN_24d7_00a8's spin and reads nothing. */
-    if (music_waiting(a)) return;
+    /* The original is inside FUN_24d7_00a8's spin and reads nothing.  The
+     * ending's loop reads nothing either - there is no way out of it. */
+    if (music_waiting(a) || a->screen == SCR_END) return;
     if (a->screen == SCR_BOOT) {
         a->screen = SCR_TITLE;
         gfx_palette(&a->gfx, CG_PAL_TITLE);
@@ -488,8 +688,9 @@ void app_move(App *a, int x, int y)
 
 void app_click(App *a, int x, int y)
 {
-    /* Nothing is listening while FUN_24d7_00a8 waits out a fade. */
-    if (music_waiting(a)) return;
+    /* Nothing is listening while FUN_24d7_00a8 waits out a fade, or ever
+     * again once the ending has started. */
+    if (music_waiting(a) || a->screen == SCR_END) return;
     if (a->screen == SCR_BOOT || a->screen == SCR_TITLE) {
         app_key(a, KEY_ENTER);
         return;
@@ -600,7 +801,20 @@ void app_tick(App *a)
             song_start(a, n);
             if (what == WAIT_PLAY) play_now(a, arg);
             else if (what == WAIT_SELECT) select_now(a);
+            else if (what == WAIT_END) ending_now(a);
         }
+        return;
+    }
+
+    if (a->screen == SCR_END) {
+        end_tick(a);
+        return;
+    }
+
+    /* 1edb:053d: every turn of the grid's loop, all thirty cleared means the
+     * ending - and the ending never comes back. */
+    if (a->screen == SCR_SELECT && all_cleared(a)) {
+        go_ending(a);
         return;
     }
 
@@ -807,6 +1021,10 @@ void app_render(App *a)
         break;
     case SCR_SELECT:
         draw_select(a);
+        break;
+    case SCR_END:
+        /* Nothing: the ending scatters straight into the framebuffer, the way
+         * it scatters into VRAM, and what is on the screen stays there. */
         break;
     default:
         draw_play(a);
