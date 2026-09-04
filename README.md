@@ -18,7 +18,7 @@ TRACE / OPTION、それに記録の保存。**
 
 * [x] ディスクを開いた — FAT12、41 ファイル（`tools/fat12.py`）
 * [x] 実行形式 — MZ、ラージモデルの Borland C、DS = 0x19ca。
-      Ghidra 12.1.3 で解析（`out/sbp98.c` 395 関数、`out/sbp98.asm` 18682 命令。
+      Ghidra 12.1.3 で解析（`out/sbp98.c` 395 関数中 387 本、`out/sbp98.asm` 18682 命令。
       `out/` は clone に入らないので RESUME の手順で作り直す）。
       Ghidra を出さずに済む所は `tools/exedis.py` で読める
 * [x] **30 面の盤面** — `SBPMEN.DAT`（`tools/men.py`、30 面 0 不整合）

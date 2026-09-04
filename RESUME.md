@@ -428,8 +428,8 @@ python tools/exedis.py find 9a 1d 00 d7 14  バイト列を探す
 **DS はファイルの 0x1aea0**。実行ファイル自身の far call が持っている
 セグメントは Ghidra の表示より 0x1000 小さい。
 
-Ghidra の結果は `out/sbp98.c`（395 関数の逆コンパイル）と
-`out/sbp98.asm`（18682 命令の逆アセンブル）。**2026-09-04 にこの作業機にも
+Ghidra の結果は `out/sbp98.c`（**395 関数のうち 387 本**。8 本は逆コンパイラ
+が落ちる ——`out/sbp98.asm` の 18682 命令の逆アセンブルが要るのはそのため）。**2026-09-04 にこの作業機にも
 Ghidra 12.1.3 と Temurin 21 を入れた**（`C:\prog\ghidra\`。パスは
 `~/.claude/CLAUDE.md` にも控えてある）。作り直すなら
 
