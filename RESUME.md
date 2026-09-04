@@ -212,8 +212,11 @@ P=$(python -c "print('lr'*35+'l')")
    * コード 253 の変調モード（`[si+0x15]` の下位 2 ビットで `0xd0c` の 4 種、
      `0x0b7a` / `0x0b84` / `0x0bae` / `0x0bcf`）。あれは音色ではなく
      **ソフト LFO の型**
-   * フェードアウト（AH=0x06）と効果音（AH=0x0c 読み込み / 0x0d 再生）。
-     ゲームは効果音バンクを読み込んでいないので、どこから鳴らすのか未調査
+   * ~~フェードアウト（AH=0x06）~~ 済み。docs/sound.md の「フェードアウト」
+   * 効果音（AH=0x0c 読み込み / 0x0d 再生）は**この game では使わない**。
+     ラッパ FUN_2502_0082（AH=0x0c）と FUN_2502_0094（AH=0x0d）を呼ぶ
+     far call が実行ファイルに 1 つも無い
+     （`python tools/exedis.py calls 2502:0082`）
 3. **エンディング。** `FUN_1edb_40bc` が BGM 1 と `END1.CG` を出す。
    `FUN_1edb_042c` の `FUN_1edb_427c() == 0` が入口条件で、それが
    「全面クリアしたか」かどうかは未確認。`END2.CG` と `STAFF1/3/4.CG`
@@ -270,10 +273,28 @@ python tools/cg.py    disk/TITLE.CG t.png --pal 0
 python tools/bgm.py   disk/SBPBGM0.BGM 0 --bars    .BGM を MML に起こす
 python tools/solve.py disk/SBPMEN.DAT 1     面を解いて手順を出す
 python tools/mmdis.py disk/MMD2.SYS map 0x78 0x264 音源ドライバを読む
+python tools/exedis.py fn 1edb:40bc         本体を Ghidra 無しで読む
+python tools/cgpy.py                        （import 用）絵を python で測る
 python tools/strings.py tmp/SBP98.BIN
 ```
 
-Ghidra の結果は `out/sbp98.c`（395 関数の逆コンパイル）と
+**`out/` は .gitignore なので clone には入っていない。** Ghidra が入って
+いないマシンではそもそも作れない（2026-09-04 の作業機がそれ）。代わりに
+
+```
+python tools/exedis.py fn 1edb:40bc 0x80    そこを逆アセンブル
+python tools/exedis.py calls 24d7:001d      そこを呼ぶ far call を全部
+python tools/exedis.py data 0x40e           DS:offset を 16 進とテキストで
+python tools/exedis.py str 0x41b            DS:offset の文字列
+python tools/exedis.py find 9a 1d 00 d7 14  バイト列を探す
+```
+
+番地の対応は `tools/exedis.py` の先頭に書いてある。要点は 2 つで、
+**ファイル位置 = 0x1200 + ((Ghidra のセグメント − 0x1000) << 4) + オフセット**、
+**DS はファイルの 0x1aea0**。実行ファイル自身の far call が持っている
+セグメントは Ghidra の表示より 0x1000 小さい。
+
+Ghidra が有るマシンでの結果は `out/sbp98.c`（395 関数の逆コンパイル）と
 `out/sbp98.asm`（18682 命令の逆アセンブル）。作り直すなら
 
 ```
